@@ -60,13 +60,14 @@ apps/api（Railway）與 apps/web（Vercel）之間唯一的介面約定。兩�
 ### `POST /bookings`
 ```json
 {
-  "service_id": "flow | love | career | quick | listen | topics-4 | topics-6 | topics-8 | topics-15",
+  "service_id": "flow | love | career | quick | listen | topics-4 | topics-6 | topics-8 | topics-15 | vip",
   "date": "YYYY-MM-DD", "time": "HH:MM",
   "name": "王小美", "gender": "female | male",
   "birth_date": "YYYY-MM-DD", "birth_time": "HH:MM 或空字串", "birth_place": "",
   "phone": "0912345678", "email": "a@b.co", "questions": "",
   "topics": ["財運", "工作", "健康", "小孩"], "topic_note": "",
-  "pay_method": "card | line | atm",
+  "pay_method": "card | line | atm | vip",
+  "vip_card_no": "VIP-AB2C-D3EF（pay_method = vip 才需要）",
   "agree": true
 }
 ```
@@ -79,6 +80,10 @@ apps/api（Railway）與 apps/web（Vercel）之間唯一的介面約定。兩�
   - `service_id` 必須是「`topic_limit` ≥ 題數」最小的價位（例：5 題 → `topics-6`），否則 `fields.topics`「主題數量與方案不符，請重新整理頁面後再選一次」
   - 主題、備註、`questions` 合併存進 `bookings.questions`（`【自選主題・依優先順序】1. …`），老師的新訂單通知信看得到；其他方案送來的 `topics` 不理會
 - `services.question_required = true` 的方案（`listen` 接住你的諮詢室）：`questions` 必填，空白 → `fields.questions`「請填寫這一欄」
+- VIP 諮詢（`services.vip_only = true`，目前是 `vip`，90 分鐘）只能 `pay_method = "vip"`，反之 `vip` 也只能用在 VIP 方案（`fields.pay_method`）：
+  - `vip_card_no` 不分大小寫、可省略連字號；格式不對 → `fields.vip_card_no`「請輸入正確的 VIP 卡號（例：VIP-AB2C-D3EF）」
+  - 卡號＋`email`（購買 VIP 時的 Email，不分大小寫）對不上 →「找不到這張 VIP 卡，請確認卡號與購買時的 Email」；過期 →「這張 VIP 卡已超過使用期限」；堂數用完 →「這張 VIP 卡的堂數已經用完」（都是 `400 validation`，`fields.vip_card_no`）
+  - 成功：同一交易內（`create_vip_booking`）建立**已確認**的預約並扣 1 堂，不需付款、不套推薦碼；`201 { "bookingId", "orderNo", "amount": 0, "payMethod": "vip", "holdExpiresAt": null, "sessionsLeft" }`，接著寄確認信與老師通知（`bookings.amount` 存每堂價值＝方案價 ÷ 堂數，僅供統計）
 - 付款方式未開通 → `400 validation`，`fields.pay_method`：「LINE Pay 即將開放，請改用信用卡」／「信用卡付款即將開放，請改用其他付款方式」／「ATM 轉帳即將開放，請改用其他付款方式」；ATM 關閉（`ATM_ENABLED` 未設為 true）→「ATM 轉帳已停止服務，請改用信用卡」（已取號的 ATM 訂單照常處理）
 - ATM 限制（`400 validation`，`fields.pay_method`）：
   - 開始時間不到 72 小時（`/config` 的 `atmMinLeadHours`）→「ATM 轉帳需於諮詢開始 72 小時前預約，請改用信用卡」
@@ -202,4 +207,47 @@ apps/api（Railway）與 apps/web（Vercel）之間唯一的介面約定。兩�
 - `POST /admin/referral-codes { kolId, code, discountType, discountValue, commissionRate?, appliesBooking?, appliesVip?, appliesShop?, startsOn?, endsOn?, maxUses? }`（日期 `YYYY-MM-DD`，結束日含當天；打折最多 90%；代碼重複 `409 duplicate`）
 - `PATCH /admin/referral-codes/:id`（同上欄位皆選填，另可 `active`；代碼與 KOL 不可改）
 - `GET /admin/referral-stats?from=YYYY-MM-DD[&to=YYYY-MM-DD]`（預設本月；沒給 `to` 時到 `from` 所在月份月底）→ `{ from, to, kols: [{ kolId, name, active, orders, pending, revenue, discount, commission }], codes: [...同上以推薦碼統計], uses: [{ orderNo, kind, code, kolName, createdAt, originalAmount, discountAmount, finalAmount, commissionAmount, state: "paid | pending | cancelled" }] }`；`orders`／`revenue`／`discount`／`commission` 只算已付款
+
+## VIP 包堂與訂單
+
+VIP 購買（之後的商店也一樣）走 `orders`：建立訂單 → 綠界信用卡付款 → 付款成功才發 VIP 卡。訂單付款前保留 30 分鐘（不占時段），逾時由背景工作改成 `expired`；逾時才付款的一樣接受。
+
+### `GET /vip/plans`（公開）
+`200 { "plans": [{ "id": "vip-4", "name": "VIP 4 堂", "sessions": 4, "price": 18000, "perSession": 4500, "validDays": 365, "description" }] }`（只回上架中的方案，依 `sort`）
+
+### `POST /vip/orders`
+```json
+{ "plan_id": "vip-10", "name": "王小美", "email": "a@b.co", "phone": "0912345678", "birth_date": "YYYY-MM-DD 或空字串", "referral_code": "", "agree": true }
+```
+- 驗證同預約（姓名、Email、手機 ≥ 9 碼）；`birth_date` 選填（寄生日禮用）；`agree` 必須為 `true`（`fields.agree`「請勾選同意購買與使用規則」）
+- 方案不存在或未上架 → `fields.plan_id`；金額取 DB `vip_plans.price`；`referral_code` 同預約（`kind = vip`，推薦碼要勾「VIP」適用）
+- 綠界未設定 → `503 payment_unavailable`
+- `201 { "orderNo", "amount" }` → 接著呼叫 `POST /payments/ecpay/order-checkout`
+
+### `POST /payments/ecpay/order-checkout` — body `{ "orderNo" }`
+- 和預約的 checkout 相同（信用卡、`{ action, fields }` 由瀏覽器 POST 到綠界）；付款結果回呼 `/payments/ecpay/order-notify`（server）與 `/payments/ecpay/order-result`（瀏覽器 → `303` 到 `<WEB_URL>/orders/<orderNo>`）；在綠界按「返回商店」也回到訂單頁
+- 已付款 → `409 already_paid`；逾時／已取消 → `409 expired`；同一訂單嘗試超過上限 → `429 too_many_attempts`
+
+### 付款成功（`apply_order_paid`，冪等）
+- 同一個 `MerchantTradeNo` 重複通知只處理一次；金額不符不改狀態
+- VIP：建立 VIP 會員（卡號 `VIP-XXXX-XXXX`、堂數＝方案堂數、期限＝付款時間＋有效天數），寄 VIP 卡號信給客人＋新訂單通知給老師
+- 同一訂單另一筆付款也成功（可能重複扣款）→ 不重複發卡，通知老師處理
+
+### `GET /orders/:orderNo`（公開，不含個資）
+`200 { "orderNo", "kind": "vip | shop", "status": "pending_payment | paid | shipped | completed | cancelled | expired", "subtotal", "shippingFee", "discountAmount", "amount", "items": [{ "name", "unitPrice", "qty" }], "holdExpiresAt", "createdAt", "trackingNo", "vip"?: { "cardNo", "planName", "sessionsTotal", "sessionsLeft", "expiresOn" } }`
+- `vip` 只在 VIP 訂單付款後出現；`expiresOn` 是最後可使用的日期（含當天）
+- 訂單頁 `/orders/<orderNo>`（web）：`pending_payment` 每 3 秒輪詢最多 10 次，之後顯示「重新付款」；付款後顯示 VIP 卡號與「用 VIP 堂數預約」
+
+### `POST /vip/lookup` — body `{ "card_no", "email" }`
+- 卡號＋購買時的 Email 都對才回：`200 { "cardNo", "name", "planName", "sessionsTotal", "sessionsUsed", "sessionsLeft", "expiresOn", "expired", "bookings": [{ "orderNo", "date", "time", "startsAt", "serviceName", "status" }] }`
+- 對不上 → `404 not_found`「找不到這張 VIP 卡，請確認卡號與購買時的 Email」；限流同付款端點
+
+### 後台
+- `GET /admin/vip-plans` → `{ plans: [{ id, name, sessions, price, validDays, description, sort, active }] }`（含未上架）
+- `POST /admin/vip-plans { id, name, sessions, price, validDays?, description?, sort?, active? }`（`id` 2–32 個英文小寫／數字／-，重複 `409 duplicate`）；`PATCH /admin/vip-plans/:id`（`id` 以外皆可改；只影響之後的購買）
+- `GET /admin/vip-members?search=&birthMonth=1-12` → `{ members: [{ id, cardNo, name, email, phone, birthDate, planId, planName, sessionsTotal, sessionsUsed, sessionsLeft, expiresOn, expired, note, createdAt }] }`（`search` 比對姓名／Email／卡號／手機；最多 500 筆）
+- `GET /admin/vip-members/:id` → `{ member, bookings: [{ orderNo, date, time, serviceName, status }] }`
+- `PATCH /admin/vip-members/:id { sessionsTotal?, sessionsUsed?, expiresOn?, note? }`（已使用不可多於總堂數；`expiresOn` 含當天）
+- `GET /admin/orders?kind=vip,shop,gift&status=…&from=&to=`（依下單時間，預設最近 60 天）→ `{ from, to, orders: [{ orderNo, kind, status, subtotal, shippingFee, discountAmount, amount, items, customer: { name, email, phone, birthDate }, shipping, note, vipPlanId, vipMemberId, trackingNo, createdAt, paidAt, shippedAt }] }`
+- `PATCH /admin/orders/:orderNo { status?: "shipped | completed | cancelled", trackingNo?, note? }`：出貨時寄出貨通知信；VIP 訂單不能出貨；未付款不能出貨；付款狀態只由金流更新；取消不會自動退款
 

@@ -54,6 +54,34 @@ describe('toBookingBody', () => {
   });
 });
 
+describe('toBookingBody（VIP 諮詢）', () => {
+  it('VIP 卡號有值 → pay_method vip、帶 vip_card_no、不帶推薦碼', () => {
+    const b = toBookingBody({
+      svc: 'vip',
+      date: '2026-10-07',
+      time: '19:00',
+      f,
+      pay: 'card',
+      agree: true,
+      referral: 'AMY10',
+      vipCard: ' VIP-AB2C-D3EF ',
+    });
+    expect(b.pay_method).toBe('vip');
+    expect(b.vip_card_no).toBe('VIP-AB2C-D3EF');
+    expect(b.referral_code).toBe('');
+    // 一般方案不會有 vip_card_no
+    expect('vip_card_no' in toBookingBody({ svc: 'love', date: 'd', time: 't', f, pay: 'card', agree: true, vipCard: null })).toBe(false);
+  });
+
+  it('vip_card_no 的錯誤回到 Step 4', () => {
+    expect(mapApiFieldErrors({ vip_card_no: '這張 VIP 卡的堂數已經用完' })).toEqual({
+      errors: { vip: '這張 VIP 卡的堂數已經用完' },
+      step: 4,
+      unknown: [],
+    });
+  });
+});
+
 describe('mapApiFieldErrors（400 validation → 欄位與步驟）', () => {
   it('對應到前端欄位，回到有錯的最前面那一步', () => {
     expect(mapApiFieldErrors({ email: '請填寫有效的 Email', agree: '請勾選同意改期與退款規則' })).toEqual({
@@ -171,6 +199,12 @@ describe('sessionStorage 草稿', () => {
     expect(d.topics).toEqual(['財運', '工作', '其他']);
     expect(d.topicNote).toHaveLength(500);
     expect(sanitizeDraft({ topics: '財運' }).topics).toEqual([]);
+  });
+
+  it('VIP 卡號：字串才留（最多 20 字）', () => {
+    expect(sanitizeDraft({ vipCard: 'VIP-AB2C-D3EF' }).vipCard).toBe('VIP-AB2C-D3EF');
+    expect(sanitizeDraft({ vipCard: 12 }).vipCard).toBe('');
+    expect(sanitizeDraft({ vipCard: 'x'.repeat(40) }).vipCard).toHaveLength(20);
   });
 
   it('推薦碼：只留格式正確的', () => {

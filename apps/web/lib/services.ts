@@ -3,10 +3,11 @@
  *
  * - SVCS：原本 4 個方案逐字複製自 design/site.dc.html 的 SVCS，另加 0004 migration 的方案（DB 沒設定或讀取失敗時的備援）
  * - getServices()：有 Supabase env 時讀 services 表（anon key + RLS，只回 active），5 分鐘 revalidate
+ *   公開頁面（首頁、方案頁、JSON-LD）不含 VIP 專用方案；預約頁用 getBookingServices()（含 VIP 諮詢）
  *
  * 欄位對照（DB → 前端）：short_name → short、description → desc、is_featured → featured、
- * topic_limit → topicLimit、question_label → questionLabel、question_required → questionRequired
- * num（壹貳參肆）不存 DB，依排序位置產生；自選主題的幾個價位合成一張卡，共用一個編號
+ * topic_limit → topicLimit、question_label → questionLabel、question_required → questionRequired、vip_only → vipOnly
+ * num（壹貳參肆）不存 DB，依排序位置產生；自選主題的幾個價位合成一張卡，共用一個編號；VIP 專用方案不編號
  */
 
 export type ServiceId = 'flow' | 'love' | 'career' | 'quick' | 'listen';
@@ -34,12 +35,14 @@ export interface Service {
   questionLabel: string | null;
   /** Step 3 問題欄必填 */
   questionRequired: boolean;
+  /** VIP 專用方案：只能用 VIP 堂數預約，不出現在一般方案列表（0007） */
+  vipOnly: boolean;
 }
 
 /** 自選主題的一個價位 */
 export type TopicTier = Service & { topicLimit: number };
 
-/** Supabase services 表的一列（DEPLOYMENT.md §3；後三個欄位來自 0004） */
+/** Supabase services 表的一列（DEPLOYMENT.md §3；topic_limit 等三個欄位來自 0004、vip_only 來自 0007） */
 export interface ServiceRow {
   id: string;
   name: string;
@@ -55,6 +58,7 @@ export interface ServiceRow {
   topic_limit?: number | null;
   question_label?: string | null;
   question_required?: boolean | null;
+  vip_only?: boolean | null;
 }
 
 const NUMERALS = ['壹', '貳', '參', '肆', '伍', '陸', '柒', '捌', '玖', '拾'];
@@ -65,7 +69,7 @@ export function toNumeral(index: number): string {
 
 type ServiceSeed = Omit<Service, 'num'>;
 
-const PLAN = { topicLimit: null, questionLabel: null, questionRequired: false } as const;
+const PLAN = { topicLimit: null, questionLabel: null, questionRequired: false, vipOnly: false } as const;
 
 const TOPIC_TAGLINE = '從 15 個主題自由勾選，依題數計價。';
 const TOPIC_DESC =
@@ -156,11 +160,12 @@ const SEED: ServiceSeed[] = [
   topicSeed(15, '自選主題（9～15 題）', 120, 3600),
 ];
 
-/** 依排序編號；自選主題的價位共用第一個價位的編號（畫面上是同一張卡） */
+/** 依排序編號；自選主題的價位共用第一個價位的編號（畫面上是同一張卡）；VIP 專用方案不占編號 */
 function withNumerals(list: ServiceSeed[]): Service[] {
   let next = 0;
   let topicNum: string | null = null;
   return list.map((s) => {
+    if (s.vipOnly) return { ...s, num: 'VIP' };
     if (s.topicLimit === null) return { ...s, num: toNumeral(next++) };
     if (topicNum === null) topicNum = toNumeral(next++);
     return { ...s, num: topicNum };
@@ -169,6 +174,22 @@ function withNumerals(list: ServiceSeed[]): Service[] {
 
 /** 靜態方案資料（原型 SVCS＋0004 的方案） */
 export const SVCS: Service[] = withNumerals(SEED);
+
+/** VIP 諮詢（0007 的 services 'vip'）：VIP 會員用堂數預約；DB 讀不到時預約頁的備援 */
+export const VIP_SERVICE: Service = {
+  ...PLAN,
+  id: 'vip',
+  num: 'VIP',
+  short: 'VIP 諮詢',
+  name: 'VIP 諮詢（90 分鐘）',
+  minutes: 90,
+  price: 4500,
+  featured: false,
+  tagline: 'VIP 會員使用堂數預約，每堂 90 分鐘。',
+  desc: 'VIP 會員專屬：輸入 VIP 卡號即可使用堂數預約，不必另外付款。',
+  includes: [],
+  vipOnly: true,
+};
 
 /** NT$2,800（和原型 'NT$' + n.toLocaleString() 相同；固定 en-US 避免伺服器語系不同） */
 export function formatPrice(n: number): string {
@@ -188,7 +209,8 @@ function isServiceRow(v: unknown): v is ServiceRow {
     (r.includes == null || (Array.isArray(r.includes) && r.includes.every((x) => typeof x === 'string'))) &&
     (r.topic_limit == null || typeof r.topic_limit === 'number') &&
     (r.question_label == null || typeof r.question_label === 'string') &&
-    (r.question_required == null || typeof r.question_required === 'boolean')
+    (r.question_required == null || typeof r.question_required === 'boolean') &&
+    (r.vip_only == null || typeof r.vip_only === 'boolean')
   );
 }
 
@@ -213,6 +235,7 @@ export function mapServiceRows(rows: unknown): Service[] | null {
       topicLimit: r.topic_limit ?? null,
       questionLabel: r.question_label?.trim() ? r.question_label : null,
       questionRequired: r.question_required === true,
+      vipOnly: r.vip_only === true,
     })),
   );
 }
@@ -220,16 +243,14 @@ export function mapServiceRows(rows: unknown): Service[] | null {
 const FETCH_TIMEOUT_MS = 5000;
 
 /**
- * 讀方案清單（Server Component 用）。
+ * 讀 DB 的方案清單（含 VIP 專用方案）。
  * 有 NEXT_PUBLIC_SUPABASE_URL + NEXT_PUBLIC_SUPABASE_ANON_KEY 才打 Supabase REST；
- * 沒設 env、逾時、非 2xx、形狀不對 → 一律回傳靜態 SVCS，頁面不會壞。
+ * 沒設 env、逾時、非 2xx、形狀不對 → null（呼叫端退回靜態資料）
  */
-export async function getServices(
-  env: Record<string, string | undefined> = process.env,
-): Promise<Service[]> {
+async function fetchServices(env: Record<string, string | undefined>): Promise<Service[] | null> {
   const base = env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const key = env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-  if (!base || !key) return SVCS;
+  if (!base || !key) return null;
 
   const url = `${base.replace(/\/+$/, '')}/rest/v1/services?select=*&active=eq.true&order=sort`;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -242,13 +263,38 @@ export async function getServices(
       timer = setTimeout(() => resolve(null), FETCH_TIMEOUT_MS);
     });
     const res = await Promise.race([request, timeout]);
-    if (!res || !res.ok) return SVCS;
-    return mapServiceRows(await res.json()) ?? SVCS;
+    if (!res || !res.ok) return null;
+    return mapServiceRows(await res.json());
   } catch {
-    return SVCS;
+    return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * 公開頁面的方案清單（Server Component 用；不含 VIP 專用方案）。
+ * DB 讀不到 → 一律回傳靜態 SVCS，頁面不會壞。
+ */
+export async function getServices(
+  env: Record<string, string | undefined> = process.env,
+): Promise<Service[]> {
+  const all = await fetchServices(env);
+  const pub = all?.filter((s) => !s.vipOnly) ?? [];
+  return pub.length > 0 ? pub : SVCS;
+}
+
+/** 預約頁的方案清單：公開方案＋VIP 諮詢（VIP 會員用堂數預約） */
+export async function getBookingServices(
+  env: Record<string, string | undefined> = process.env,
+): Promise<Service[]> {
+  const all = await fetchServices(env);
+  return all && all.some((s) => !s.vipOnly) ? all : [...SVCS, VIP_SERVICE];
+}
+
+/** 一般方案（預約頁 Step 1 的主列表）與 VIP 專用方案 */
+export function splitVip(services: Service[]): { plans: Service[]; vip: Service[] } {
+  return { plans: services.filter((s) => !s.vipOnly), vip: services.filter((s) => s.vipOnly) };
 }
 
 export function findService(services: Service[], id: string | null | undefined): Service | undefined {

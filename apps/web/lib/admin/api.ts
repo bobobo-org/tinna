@@ -172,3 +172,83 @@ export const ORDER_KIND_LABELS: Record<ReferralStats['uses'][number]['kind'], st
   vip: 'VIP',
   shop: '商店',
 };
+
+// ---------- VIP 包堂 ----------
+
+export interface AdminVipPlan {
+  id: string;
+  name: string;
+  sessions: number;
+  price: number;
+  validDays: number;
+  description: string | null;
+  sort: number;
+  active: boolean;
+}
+
+export interface AdminVipMember {
+  id: string;
+  cardNo: string;
+  name: string;
+  email: string;
+  phone: string;
+  birthDate: string | null;
+  planId: string | null;
+  planName: string;
+  sessionsTotal: number;
+  sessionsUsed: number;
+  sessionsLeft: number;
+  /** 最後可使用的日期（含當天） */
+  expiresOn: string;
+  expired: boolean;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface AdminVipBooking {
+  orderNo: string;
+  date: string;
+  time: string;
+  serviceName: string;
+  status: AdminBookingRow['status'];
+}
+
+// ---------- 訂單（VIP／商店／贈品） ----------
+
+export type OrderKind = 'vip' | 'shop' | 'gift';
+export type OrderStatus = 'pending_payment' | 'paid' | 'shipped' | 'completed' | 'cancelled' | 'expired';
+
+export interface AdminOrder {
+  orderNo: string;
+  kind: OrderKind;
+  status: OrderStatus;
+  subtotal: number;
+  shippingFee: number;
+  discountAmount: number;
+  amount: number;
+  items: { productId: string | null; name: string; unitPrice: number; qty: number }[];
+  customer: { name: string; email: string; phone: string; birthDate: string | null };
+  shipping: { name: string | null; phone: string | null; address: string } | null;
+  note: string | null;
+  vipPlanId: string | null;
+  vipMemberId: string | null;
+  trackingNo: string | null;
+  createdAt: string;
+  paidAt: string | null;
+  shippedAt: string | null;
+}
+
+export const COMMERCE_KIND_LABELS: Record<OrderKind, string> = {
+  vip: 'VIP 包堂',
+  shop: '商店',
+  gift: 'VIP 贈品',
+};
+
+export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
+  pending_payment: '待付款',
+  paid: '已付款',
+  shipped: '已出貨',
+  completed: '已完成',
+  cancelled: '已取消',
+  expired: '已逾時',
+};

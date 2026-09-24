@@ -1,5 +1,6 @@
+import Link from 'next/link';
 import type { ReactNode, Ref } from 'react';
-import { findService, formatPrice, isTopicTier, topicTiers, type Service } from '@/lib/services';
+import { findService, formatPrice, isTopicTier, splitVip, topicTiers, type Service } from '@/lib/services';
 import { focusRingWithin } from './styles';
 import TopicPicker from './TopicPicker';
 
@@ -44,6 +45,7 @@ function PlanCard({
 /**
  * Step 1 選擇方案：單選列表
  * 自選主題的幾個價位合成一張卡（放在第一個價位的排序位置），選了之後下方展開主題勾選
+ * VIP 諮詢（vipOnly）放在最後的「VIP 會員」區塊：用堂數預約，不顯示價格
  */
 export default function StepService({
   services,
@@ -67,8 +69,9 @@ export default function StepService({
   notice: string | null;
   headingRef: Ref<HTMLHeadingElement>;
 }) {
-  const tiers = topicTiers(services);
-  const anchor = services.find(isTopicTier)?.id;
+  const { plans, vip } = splitVip(services);
+  const tiers = topicTiers(plans);
+  const anchor = plans.find(isTopicTier)?.id;
   const topicOn = isTopicTier(findService(services, selected));
   const minutes = tiers.map((t) => t.minutes);
   const lo = Math.min(...minutes);
@@ -85,7 +88,7 @@ export default function StepService({
         </p>
       )}
       <div role="radiogroup" aria-labelledby="bk-step-title" className="flex flex-col gap-[14px]">
-        {services.map((s) => {
+        {plans.map((s) => {
           if (!isTopicTier(s)) {
             return (
               <PlanCard
@@ -117,8 +120,35 @@ export default function StepService({
             />
           );
         })}
+        {vip.length > 0 && (
+          <p className="mt-2 flex items-center gap-3 text-[13px] tracking-[.2em] text-rose-accent" aria-hidden="true">
+            <span className="h-px flex-1 bg-rose-600/20" />
+            VIP 會員
+            <span className="h-px flex-1 bg-rose-600/20" />
+          </p>
+        )}
+        {vip.map((s) => (
+          <PlanCard
+            key={s.id}
+            value={s.id}
+            on={selected === s.id}
+            onSelect={() => onPick(s.id)}
+            title={s.name}
+            sub={`${s.minutes} 分鐘 · 輸入 VIP 卡號，使用堂數預約`}
+            price={<span className="text-[15px]">VIP 堂數</span>}
+          />
+        ))}
       </div>
       {topicOn && <TopicPicker tiers={tiers} topics={topics} onToggle={onToggleTopic} note={topicNote} onNote={onTopicNote} />}
+      {vip.length > 0 && (
+        <p className="text-[13px] leading-[1.8] text-ink-500">
+          想要更划算？
+          <Link href="/vip" className="text-rose-800 underline underline-offset-4">
+            VIP 包堂方案
+          </Link>
+          堂數越多、每堂越便宜。
+        </p>
+      )}
     </div>
   );
 }

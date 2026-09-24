@@ -33,6 +33,7 @@ export const EMPTY_DRAFT: BookingDraft = {
   topics: [],
   topicNote: '',
   referral: '',
+  vipCard: '',
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -98,6 +99,7 @@ export function sanitizeDraft(raw: unknown): BookingDraft {
     topics: sanitizeTopics(r.topics),
     topicNote: str(r.topicNote, TOPIC_NOTE_MAX),
     referral: typeof r.referral === 'string' && CODE_RE.test(r.referral) ? r.referral : '',
+    vipCard: str(r.vipCard, 20),
   };
 }
 

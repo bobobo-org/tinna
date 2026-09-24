@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SVCS,
+  VIP_SERVICE,
   findService,
   formatPrice,
+  getBookingServices,
   getServices,
   isTopicTier,
   mapServiceRows,
   minPrice,
+  splitVip,
   tierFor,
   tierRangeLabel,
   topicRange,
@@ -79,7 +82,7 @@ describe('SVCS（原型資料＋0004 的方案）', () => {
 describe('mapServiceRows', () => {
   it('依 sort 排序、欄位改名、null 補預設、重新編號', () => {
     const out = mapServiceRows(rows);
-    const plan = { topicLimit: null, questionLabel: null, questionRequired: false };
+    const plan = { topicLimit: null, questionLabel: null, questionRequired: false, vipOnly: false };
     expect(out).toEqual([
       { id: 'a', num: '壹', name: '第一', short: '一', minutes: 30, price: 1200, tagline: 't', desc: '', includes: ['x'], featured: false, ...plan },
       { id: 'b', num: '貳', name: '第二', short: '二', minutes: 45, price: 2000, tagline: '', desc: '說明', includes: [], featured: true, ...plan },
@@ -106,6 +109,16 @@ describe('mapServiceRows', () => {
       ['t8', '參', 8, null, false],
     ]);
     expect(mapServiceRows([{ ...rows[0], topic_limit: '4' }])).toBeNull();
+  });
+
+  it('0007 vip_only：VIP 專用方案不占編號', () => {
+    const out = mapServiceRows([{ ...rows[0], id: 'vip', sort: 0, vip_only: true }, ...rows])!;
+    expect(out.map((s) => [s.id, s.num, s.vipOnly])).toEqual([
+      ['vip', 'VIP', true],
+      ['a', '壹', false],
+      ['b', '貳', false],
+    ]);
+    expect(mapServiceRows([{ ...rows[0], vip_only: 'yes' }])).toBeNull();
   });
 
   it('形狀不對或空陣列回傳 null', () => {
@@ -167,6 +180,19 @@ describe('getServices', () => {
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('[]', { status: 200 })));
     await expect(getServices(ENV)).resolves.toBe(SVCS);
+  });
+
+  it('公開頁面不含 VIP 專用方案；預約頁（getBookingServices）含', async () => {
+    const withVip = [...rows, { ...rows[0], id: 'vip', sort: 9, vip_only: true }];
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(JSON.stringify(withVip), { status: 200 })));
+    expect((await getServices(ENV)).map((s) => s.id)).toEqual(['a', 'b']);
+    expect((await getBookingServices(ENV)).map((s) => s.id)).toEqual(['a', 'b', 'vip']);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 500 })));
+    const fallback = await getBookingServices(ENV);
+    expect(fallback.map((s) => s.id)).toEqual([...SVCS.map((s) => s.id), 'vip']);
+    expect(fallback[fallback.length - 1]).toBe(VIP_SERVICE);
+    expect(splitVip(fallback)).toEqual({ plans: SVCS, vip: [VIP_SERVICE] });
   });
 
   it('逾時（5 秒）→ SVCS', async () => {

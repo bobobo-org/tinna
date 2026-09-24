@@ -1,7 +1,7 @@
 import { connection } from 'next/server';
 import BookingFlow from '@/components/booking/BookingFlow';
 import { pageMetadata } from '@/lib/metadata';
-import { getServices } from '@/lib/services';
+import { getBookingServices } from '@/lib/services';
 
 export const metadata = pageMetadata({
   title: '線上預約',
@@ -17,6 +17,6 @@ export const metadata = pageMetadata({
  */
 export default async function BookingPage() {
   await connection();
-  const services = await getServices();
+  const services = await getBookingServices();
   return <BookingFlow services={services} serverNow={Date.now()} />;
 }

@@ -11,6 +11,8 @@ import { btnGhost } from './ui';
 export const ADMIN_NAV = [
   { href: '/admin', label: '總覽' },
   { href: '/admin/bookings', label: '預約' },
+  { href: '/admin/vip', label: 'VIP' },
+  { href: '/admin/orders', label: '訂單' },
   { href: '/admin/referrals', label: '推薦碼' },
 ] as const;
 

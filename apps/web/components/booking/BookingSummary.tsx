@@ -7,6 +7,10 @@ export interface SummaryValues {
   date: string;
   time: string;
   price: string;
+  /** 金額欄標題（預設「應付金額」；VIP 諮詢是「使用堂數」） */
+  priceLabel?: string;
+  /** 摘要卡底下的說明（預設付款完成即保留時段） */
+  note?: string;
 }
 
 export function SummaryCard({ sum }: { sum: SummaryValues }) {
@@ -38,10 +42,10 @@ export function SummaryCard({ sum }: { sum: SummaryValues }) {
       </dl>
       <div aria-hidden="true" className="h-px bg-rose-800/20" />
       <div className="flex items-baseline justify-between">
-        <span className="text-[15px] text-ink-700">應付金額</span>
+        <span className="text-[15px] text-ink-700">{sum.priceLabel ?? '應付金額'}</span>
         <span className="font-serif text-[30px] font-bold text-rose-800">{sum.price}</span>
       </div>
-      <p className="text-[12px] leading-[1.8] text-ink-600">付款完成即保留時段，確認信將寄至您的 Email。</p>
+      <p className="text-[12px] leading-[1.8] text-ink-600">{sum.note ?? '付款完成即保留時段，確認信將寄至您的 Email。'}</p>
     </aside>
   );
 }
@@ -112,10 +116,10 @@ export function MobileBar({
           onClick={onToggle}
           aria-expanded={open}
           aria-controls={open ? 'bk-sum-panel' : undefined}
-          aria-label={`應付金額 ${sum.price}，${open ? '收起' : '展開'}預約摘要`}
+          aria-label={`${sum.priceLabel ?? '應付金額'} ${sum.price}，${open ? '收起' : '展開'}預約摘要`}
           className="flex min-w-0 flex-1 flex-col text-left"
         >
-          <span className="text-[12px] text-ink-400">{`應付金額 ${open ? '▾' : '▴'}`}</span>
+          <span className="text-[12px] text-ink-400">{`${sum.priceLabel ?? '應付金額'} ${open ? '▾' : '▴'}`}</span>
           <span className="font-serif text-[22px] font-bold text-rose-800">{sum.price}</span>
         </button>
         <button

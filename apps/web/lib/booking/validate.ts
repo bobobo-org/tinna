@@ -6,8 +6,10 @@
  * - Step 3：姓名非空、出生日期必填、Email、手機數字 ≥ 9 碼；方案要求時問題欄必填（接住你的諮詢室）
  *   另補上 API 的出生日期範圍（1900-01-01 ～ 今天），避免送出後才被擋
  * - Step 4：同意條款必勾；信用卡不在本站收卡號，所以沒有卡號驗證
+ *   VIP 諮詢：不選付款方式，改驗證 VIP 卡號格式（卡號＋Email 是否對得上由 API 判斷）
  */
 
+import { normalizeVipCard } from '../vip';
 import type { BookingForm, FieldErrors, PayMethod, Step } from './types';
 
 export const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -25,6 +27,7 @@ export const MSG = {
   qRequired: '請填寫這一欄',
   agree: '請勾選同意改期與退款規則',
   payUnavailable: '這個付款方式即將開放，請改選其他付款方式',
+  vipCard: '請輸入正確的 VIP 卡號（例：VIP-AB2C-D3EF）',
 } as const;
 
 export interface ValidationInput {
@@ -40,6 +43,8 @@ export interface ValidationInput {
   topicsShort?: number;
   /** Step 3 問題欄必填（接住你的諮詢室） */
   qRequired?: boolean;
+  /** VIP 諮詢：輸入的 VIP 卡號（null 或沒給：一般方案，要選付款方式） */
+  vipCard?: string | null;
 }
 
 export function validateDetails(f: BookingForm, today: string, qRequired = false): FieldErrors {
@@ -62,7 +67,9 @@ export function validateStep(step: Step, s: ValidationInput, today: string): Fie
   if (step === 2 && !(s.date && s.time)) e.dt = MSG.dt;
   if (step === 3) Object.assign(e, validateDetails(s.f, today, s.qRequired));
   if (step === 4) {
-    if (s.payEnabled && s.payEnabled[s.pay] === false) e.pay = MSG.payUnavailable;
+    if (s.vipCard != null) {
+      if (!normalizeVipCard(s.vipCard)) e.vip = MSG.vipCard;
+    } else if (s.payEnabled && s.payEnabled[s.pay] === false) e.pay = MSG.payUnavailable;
     if (!s.agree) e.agree = MSG.agree;
   }
   return e;
@@ -89,7 +96,7 @@ export function canGoNext(step: Step, s: ValidationInput, today: string): boolea
 }
 
 /** 顯示錯誤時的欄位順序（捲到第一個錯誤欄位） */
-export const FIELD_ORDER = ['name', 'gender', 'bdate', 'btime', 'bplace', 'phone', 'email', 'q', 'pay', 'ref', 'agree'] as const;
+export const FIELD_ORDER = ['name', 'gender', 'bdate', 'btime', 'bplace', 'phone', 'email', 'q', 'pay', 'ref', 'vip', 'agree'] as const;
 
 export function firstErrorField(e: FieldErrors): (typeof FIELD_ORDER)[number] | null {
   return FIELD_ORDER.find((k) => e[k]) ?? null;

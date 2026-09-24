@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, MSG_NETWORK, api } from '@/lib/api';
 import { bookableMonths, reconcileSelection } from '@/lib/booking/calendar';
-import { EMPTY_FORM, loadDraft, saveDraft } from '@/lib/booking/draft';
+import { EMPTY_FORM, clearDraft, loadDraft, saveDraft } from '@/lib/booking/draft';
 import { goToPayment } from '@/lib/booking/pay';
 import { fallbackPay, payAvailability } from '@/lib/booking/payments';
 import {
@@ -33,6 +33,7 @@ import StepDetails from './StepDetails';
 import StepPayment from './StepPayment';
 import StepSchedule from './StepSchedule';
 import StepService from './StepService';
+import StepVip from './StepVip';
 import Stepper from './Stepper';
 import { availKey, STALE_MS, useAvailability } from './useAvailability';
 import { useTextEntryFocus } from './useTextEntryFocus';
@@ -51,6 +52,7 @@ const FIELD_ELEMENT: Record<string, string> = {
   email: 'bk-email',
   q: 'bk-q',
   ref: 'bk-ref',
+  vip: 'bk-vip',
   agree: 'bk-agree',
   payError: 'bk-pay-error',
 };
@@ -106,6 +108,8 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   const pendingRef = useRef<string | null>(null);
   /** 使用者自己拿掉推薦碼後，不再自動帶入 */
   const refDismissed = useRef(false);
+  // VIP 諮詢：VIP 卡號（取代付款方式）
+  const [vipCard, setVipCard] = useState('');
   const [err, setErr] = useState<FieldErrors>({});
   const [paying, setPaying] = useState(false);
   const [sumOpen, setSumOpen] = useState(false);
@@ -121,6 +125,7 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   const isTier = isTopicTier(service);
   const topicsShort = isTier && range ? Math.max(0, range.min - topics.length) : 0;
   const qRequired = service?.questionRequired === true;
+  const isVip = service?.vipOnly === true;
   const cardRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const submitting = useRef(false);
@@ -139,10 +144,11 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     payEnabled: payAv.enabled,
     topicsShort,
     qRequired,
+    vipCard: isVip ? vipCard : null,
   };
   // 讓 effect／非同步流程讀到最新值（不必把每個 state 都列進 deps）
-  const latest = useRef({ svc, step, date, time, f, pay, agree, order, topics, topicNote, referral, vin, today });
-  latest.current = { svc, step, date, time, f, pay, agree, order, topics, topicNote, referral, vin, today };
+  const latest = useRef({ svc, step, date, time, f, pay, agree, order, topics, topicNote, referral, vipCard, vin, today });
+  latest.current = { svc, step, date, time, f, pay, agree, order, topics, topicNote, referral, vipCard, vin, today };
 
   const requestFocus = useCallback((id: string) => setFocusReq((p) => ({ id, n: (p?.n ?? 0) + 1 })), []);
 
@@ -257,6 +263,7 @@ export default function BookingFlow({ services, serverNow }: { services: Service
         setRefInput(d.referral);
         pendingRef.current = d.referral;
       }
+      setVipCard(d.vipCard);
     }
     // 自選主題：價位跟著還原的題數走（網址帶的價位可能和題數不符）
     if (isTopicTier(findService(services, nextSvc))) nextSvc = tierFor(tiers, nextTopics.length)?.id ?? nextSvc;
@@ -310,8 +317,8 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   // 存草稿（關分頁即清）
   useEffect(() => {
     if (!restored) return;
-    saveDraft({ svc, date, time, f, pay, agree, order, topics, topicNote, referral: referral?.code ?? '' });
-  }, [restored, svc, date, time, f, pay, agree, order, topics, topicNote, referral]);
+    saveDraft({ svc, date, time, f, pay, agree, order, topics, topicNote, referral: referral?.code ?? '', vipCard });
+  }, [restored, svc, date, time, f, pay, agree, order, topics, topicNote, referral, vipCard]);
 
   // 從綠界按返回（bfcache 還原）：解除「付款處理中…」
   useEffect(() => {
@@ -385,9 +392,9 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     setNotice((prev) => prev ?? (r.reason === 'date' ? MSG_DATE_GONE : MSG_TIME_GONE));
   }, [step, svc, date, time, avail]);
 
-  // ---------- Step 4：付款方式開通狀態 ----------
+  // ---------- Step 4：付款方式開通狀態（VIP 諮詢不選付款方式） ----------
   useEffect(() => {
-    if (step !== 4 || config) return;
+    if (step !== 4 || config || isVip) return;
     const ctrl = new AbortController();
     api
       .getConfig(ctrl.signal)
@@ -396,11 +403,11 @@ export default function BookingFlow({ services, serverNow }: { services: Service
         // 讀不到就不停用任何方式，送出時由 API 判斷
       });
     return () => ctrl.abort();
-  }, [step, config]);
+  }, [step, config, isVip]);
 
   // Step 4：草稿裡已套用的推薦碼，或 KOL 分享連結帶進來的推薦碼 → 自動套用（重新向 API 確認還能不能用）
   useEffect(() => {
-    if (step !== 4 || referral || refDismissed.current) return;
+    if (step !== 4 || referral || refDismissed.current || isVip) return;
     const code = pendingRef.current ?? loadReferral();
     pendingRef.current = null;
     if (code) {
@@ -414,14 +421,14 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   // 目前的付款方式不能用（未開通／改成近期時段後 ATM 不適用）→ 自動改回可用的方式並提示
   const { card: canCard, line: canLine, atm: canAtm } = payAv.enabled;
   useEffect(() => {
-    if (step !== 4) return;
+    if (step !== 4 || isVip) return;
     const alt = fallbackPay(pay, { card: canCard, line: canLine, atm: canAtm });
     if (!alt) return;
     setPay(alt);
     if (pay === 'atm' && payAv.atmTooSoon) {
       setPayNotice(`所選時段距離諮詢開始不到 ${payAv.leadHours} 小時，無法使用 ATM 轉帳，已改為${PAY_LABELS[alt]}付款。`);
     }
-  }, [step, pay, canCard, canLine, canAtm, payAv.atmTooSoon, payAv.leadHours]);
+  }, [step, isVip, pay, canCard, canLine, canAtm, payAv.atmTooSoon, payAv.leadHours]);
 
   // ---------- 動作 ----------
   const pickSvc = (id: string) => {
@@ -535,7 +542,11 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     // 推薦碼在送出時才被拒（例：剛好過期或額滿）→ 拿掉已套用的，讓使用者看到輸入框與錯誤
     if (m.errors.ref) setReferral(null);
     const extra =
-      m.unknown.length > 0 ? m.unknown.join('、') : !m.errors.agree && !m.errors.pay && !m.errors.ref ? e.message : null;
+      m.unknown.length > 0
+        ? m.unknown.join('、')
+        : !m.errors.agree && !m.errors.pay && !m.errors.ref && !m.errors.vip
+          ? e.message
+          : null;
     if (extra) setPayError(extra);
     requestFocus(firstErrorField(m.errors) ?? 'payError');
   };
@@ -576,6 +587,7 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     const cur = latest.current;
     if (!cur.svc || !cur.date || !cur.time) return failPayment('請重新選擇方案與時段');
     if (reuse) return redirectToPayment(reuse, retried);
+    const vipNow = findService(services, cur.svc)?.vipOnly === true;
     try {
       const tp = topicPayload(cur);
       const res = await api.createBooking(
@@ -588,8 +600,15 @@ export default function BookingFlow({ services, serverNow }: { services: Service
           agree: cur.agree,
           ...tp,
           referral: cur.referral?.code ?? '',
+          vipCard: vipNow ? cur.vipCard : null,
         }),
       );
+      // VIP 堂數：預約已確認（不需付款）→ 清掉草稿、直接到完成頁
+      if (res.payMethod === 'vip') {
+        clearDraft();
+        router.push(`/booking/success?order=${encodeURIComponent(res.orderNo)}`);
+        return;
+      }
       const o: PendingOrder = {
         orderNo: res.orderNo,
         svc: cur.svc,
@@ -654,13 +673,16 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     submitting.current = true;
     setPaying(true);
     setPayError(null);
-    const reuse = canReuseOrder(
-      cur.order,
-      { svc: cur.svc, date: cur.date, time: cur.time, pay: cur.pay, f: cur.f, ...topicPayload(cur), referral: cur.referral?.code ?? '' },
-      now(),
-    )
-      ? cur.order
-      : null;
+    const vipNow = findService(services, cur.svc)?.vipOnly === true;
+    const reuse =
+      !vipNow &&
+      canReuseOrder(
+        cur.order,
+        { svc: cur.svc, date: cur.date, time: cur.time, pay: cur.pay, f: cur.f, ...topicPayload(cur), referral: cur.referral?.code ?? '' },
+        now(),
+      )
+        ? cur.order
+        : null;
     void createAndPay(reuse);
   };
 
@@ -692,15 +714,28 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   // ---------- 畫面 ----------
   const nextEnabled = canGoNext(step, vin, today) && !paying;
   // 推薦碼折扣（和 API 相同算法；實際收費以建立訂單時 API 算的為準）
-  const discount = service && referral ? applyDiscount(service.price, referral).discount : 0;
-  const price = service ? formatPrice(service.price - discount) : 'NT$0';
-  const nextLabel = paying ? '付款處理中…' : step === 4 ? (pay === 'atm' ? '取得轉帳帳號' : `確認付款 ${service ? price : ''}`) : '下一步';
-  const nextLabelM = paying ? '處理中…' : step === 4 ? (pay === 'atm' ? '取得帳號' : '確認付款') : '下一步';
+  const discount = service && referral && !isVip ? applyDiscount(service.price, referral).discount : 0;
+  const price = isVip ? '1 堂' : service ? formatPrice(service.price - discount) : 'NT$0';
+  const nextLabel = isVip
+    ? paying
+      ? '預約處理中…'
+      : step === 4
+        ? '確認預約（扣 1 堂）'
+        : '下一步'
+    : paying
+      ? '付款處理中…'
+      : step === 4
+        ? pay === 'atm'
+          ? '取得轉帳帳號'
+          : `確認付款 ${service ? price : ''}`
+        : '下一步';
+  const nextLabelM = paying ? '處理中…' : step === 4 ? (isVip ? '確認預約' : pay === 'atm' ? '取得帳號' : '確認付款') : '下一步';
   const sum: SummaryValues = {
     svc: service ? (isTier ? `${service.short}（${topics.length} 題）` : service.name) : '尚未選擇',
     date: formatDateLabel(date),
     time: time || '—',
     price,
+    ...(isVip ? { priceLabel: '使用堂數', note: '送出即確認時段並扣 1 堂，確認信將寄至您的 Email。' } : {}),
   };
 
   return (
@@ -754,10 +789,36 @@ export default function BookingFlow({ services, serverNow }: { services: Service
                   onChange={setField}
                   qLabel={service?.questionLabel ?? null}
                   qRequired={qRequired}
+                  emailNote={isVip ? '需與購買 VIP 時相同' : null}
                   headingRef={headingRef}
                 />
               )}
-              {step === 4 && (
+              {step === 4 && isVip && (
+                <StepVip
+                  vipCard={vipCard}
+                  email={f.email}
+                  agree={agree}
+                  errors={err}
+                  payError={payError}
+                  busy={paying}
+                  onVipCard={(v) => {
+                    setVipCard(v);
+                    setPayError(null);
+                    setErr((prev) => {
+                      if (!prev.vip) return prev;
+                      const next = { ...prev };
+                      delete next.vip;
+                      return next;
+                    });
+                  }}
+                  onToggleAgree={(v) => {
+                    setAgree(v);
+                    if (v) setErr((prev) => ({ ...prev, agree: undefined }));
+                  }}
+                  headingRef={headingRef}
+                />
+              )}
+              {step === 4 && !isVip && (
                 <StepPayment
                   pay={pay}
                   agree={agree}

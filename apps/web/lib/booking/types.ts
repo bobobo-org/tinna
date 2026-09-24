@@ -6,6 +6,9 @@ export type Step = 1 | 2 | 3 | 4;
 
 export type PayMethod = 'card' | 'line' | 'atm';
 
+/** 預約的付款方式：線上付款三種＋VIP 堂數（VIP 諮詢專用） */
+export type BookingPayMethod = PayMethod | 'vip';
+
 /** 原型用中文字存性別；送 API 時轉成 female / male */
 export type Gender = '女' | '男';
 
@@ -42,6 +45,7 @@ export type FieldKey =
   | 'q'
   | 'pay'
   | 'ref'
+  | 'vip'
   | 'agree';
 
 export type FieldErrors = Partial<Record<FieldKey, string>>;
@@ -75,6 +79,8 @@ export interface BookingDraft {
   topicNote: string;
   /** 已套用的 KOL 推薦碼（空字串＝沒有） */
   referral: string;
+  /** VIP 諮詢：輸入的 VIP 卡號 */
+  vipCard: string;
 }
 
 // ---------- API 回應（docs/API.md） ----------
@@ -121,7 +127,9 @@ export interface CreateBookingBody {
   topic_note: string;
   /** KOL 推薦碼（空字串＝沒有）；折扣由 API 依 DB 設定計算 */
   referral_code: string;
-  pay_method: PayMethod;
+  pay_method: BookingPayMethod;
+  /** VIP 諮詢才有：VIP 卡號（Email 需與購買 VIP 時相同） */
+  vip_card_no?: string;
   agree: boolean;
 }
 
@@ -129,8 +137,10 @@ export interface CreateBookingResponse {
   bookingId: string;
   orderNo: string;
   amount: number;
-  payMethod: PayMethod;
+  payMethod: BookingPayMethod;
   holdExpiresAt: string | null;
+  /** VIP 堂數預約：扣完這堂後剩幾堂 */
+  sessionsLeft?: number;
 }
 
 export type BookingStatus =
@@ -144,7 +154,7 @@ export type BookingStatus =
 export interface PublicBooking {
   orderNo: string;
   status: BookingStatus;
-  payMethod: PayMethod;
+  payMethod: BookingPayMethod;
   amount: number;
   service: { id: string; name: string; minutes: number };
   date: string;

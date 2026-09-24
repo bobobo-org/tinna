@@ -40,7 +40,7 @@ export default async function ServicesPage() {
         <p className="text-[16px] text-ink-600">皆為線上視訊 · 附錄影檔與重點筆記 · 付款後即確認時段</p>
       </section>
 
-      <section aria-label="方案列表" className="px-[clamp(24px,4vw,56px)] pb-20 pt-14">
+      <section aria-label="方案列表" className="px-[clamp(24px,4vw,56px)] pb-12 pt-14">
         <div className="mx-auto grid max-w-[1100px] grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-[22px]">
           {services.map((s, i) => {
             if (isTopicTier(s)) {
@@ -108,6 +108,26 @@ export default async function ServicesPage() {
               </div>
             );
           })}
+        </div>
+      </section>
+
+      <section aria-labelledby="svc-vip-title" className="px-[clamp(24px,4vw,56px)] pb-24">
+        <div
+          data-reveal
+          className="satin mx-auto flex max-w-[1100px] flex-wrap items-center justify-between gap-5 rounded-[18px] border border-white/80 px-[26px] py-8 shadow-card md:px-10"
+        >
+          <div className="flex max-w-[640px] flex-col gap-2">
+            <p className="text-[13px] tracking-[.4em] text-rose-accent">VIP</p>
+            <h2 id="svc-vip-title" className="font-serif text-[24px] font-bold text-ink-900">
+              VIP 包堂：堂數越多越划算
+            </h2>
+            <p className="text-[14px] leading-[1.9] text-ink-600">
+              一次購買 4～20 堂 90 分鐘的一對一諮詢，預約時輸入 VIP 卡號即可使用；另有 VIP 專屬生日禮與不定期贈品。
+            </p>
+          </div>
+          <Link href="/vip" className="rounded-pill bg-btn px-7 py-[13px] text-[15px] font-bold text-white shadow-btn-sm hover:brightness-[1.08]">
+            看 VIP 方案
+          </Link>
         </div>
       </section>
     </>

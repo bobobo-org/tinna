@@ -16,6 +16,7 @@ import type {
   PublicBooking,
 } from './booking/types';
 import type { ReferralPreview } from './referral';
+import type { PublicOrder, VipLookupResponse, VipOrderBody } from './vip';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -142,6 +143,15 @@ export function createApiClient(baseUrl: string | undefined, fetchImpl: typeof f
       request<EcpayCheckoutResponse>('/payments/ecpay/checkout', { method: 'POST', body: { orderNo }, timeoutMs: 25_000 }),
     linepayRequest: (orderNo: string) =>
       request<LinePayRequestResponse>('/payments/linepay/request', { method: 'POST', body: { orderNo }, timeoutMs: 25_000 }),
+    // ---------- VIP 包堂／訂單（docs/API.md「VIP 包堂」） ----------
+    createVipOrder: (body: VipOrderBody) =>
+      request<{ orderNo: string; amount: number }>('/vip/orders', { method: 'POST', body, timeoutMs: 25_000 }),
+    vipLookup: (cardNo: string, email: string) =>
+      request<VipLookupResponse>('/vip/lookup', { method: 'POST', body: { card_no: cardNo, email } }),
+    getOrder: (orderNo: string, signal?: AbortSignal) =>
+      request<PublicOrder>(`/orders/${encodeURIComponent(orderNo)}`, { signal }),
+    orderCheckout: (orderNo: string) =>
+      request<EcpayCheckoutResponse>('/payments/ecpay/order-checkout', { method: 'POST', body: { orderNo }, timeoutMs: 25_000 }),
   };
 }
 

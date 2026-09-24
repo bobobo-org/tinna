@@ -31,6 +31,7 @@ export const FONT_CSS_URL =
 export const NAV_ITEMS = [
   { href: '/', label: '首頁' },
   { href: '/services', label: '諮詢方案' },
+  { href: '/vip', label: 'VIP 包堂' },
   { href: '/about', label: '老師介紹' },
   { href: '/faq', label: '常見問題' },
 ] as const;

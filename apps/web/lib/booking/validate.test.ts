@@ -104,6 +104,19 @@ describe('步驟退回（網址 step 超前 → 第一個未完成的步驟）',
   });
 });
 
+describe('VIP 諮詢（用堂數預約）', () => {
+  it('Step 4 驗證 VIP 卡號格式（不看付款方式）；同意條款一樣必勾', () => {
+    const vip = { ...complete, svc: 'vip', payEnabled: { card: false, line: false, atm: false } };
+    expect(validateStep(4, { ...vip, vipCard: '' }, TODAY)).toEqual({ vip: MSG.vipCard });
+    expect(validateStep(4, { ...vip, vipCard: 'VIP-1234' }, TODAY)).toEqual({ vip: MSG.vipCard });
+    expect(validateStep(4, { ...vip, vipCard: 'vip ab2c d3ef' }, TODAY)).toEqual({});
+    expect(validateStep(4, { ...vip, vipCard: 'VIP-AB2C-D3EF', agree: false }, TODAY)).toEqual({ agree: MSG.agree });
+    // 一般方案不看卡號
+    expect(validateStep(4, { ...complete, vipCard: null }, TODAY)).toEqual({});
+    expect(firstErrorField({ vip: 'x', agree: 'y' })).toBe('vip');
+  });
+});
+
 describe('自選主題與必填問題欄', () => {
   it('自選主題還差題數 → Step 1 不能按下一步，網址超前會退回 Step 1', () => {
     const topicsSvc = { ...complete, svc: 'topics-4' };

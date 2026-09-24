@@ -3,6 +3,7 @@ import type { PayAvailability } from '@/lib/booking/payments';
 import type { FieldErrors, PayMethod, PaymentConfig } from '@/lib/booking/types';
 import type { ReferralPreview } from '@/lib/referral';
 import { formatPrice } from '@/lib/services';
+import { AgreeField, PayError } from './AgreeField';
 import { errorCls, focusRingWithin, inputCls } from './styles';
 
 const PAY_DEFS: { id: PayMethod; label: string; sub: string }[] = [
@@ -193,36 +194,8 @@ export default function StepPayment({
         </p>
       )}
 
-      <label className="relative -my-[11px] flex cursor-pointer items-center gap-[10px] py-[11px] text-[14px] text-ink-600">
-        <input
-          id="bk-agree"
-          type="checkbox"
-          checked={agree}
-          disabled={busy}
-          onChange={(e) => onToggleAgree(e.target.checked)}
-          aria-invalid={errors.agree ? true : undefined}
-          aria-describedby={errors.agree ? 'bk-agree-err' : undefined}
-          className="peer sr-only"
-        />
-        <span
-          aria-hidden="true"
-          className={`box-content flex h-[18px] w-[18px] flex-none items-center justify-center rounded-[5px] border-2 border-rose-600 text-[12px] text-white peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-rose-600 ${
-            agree ? 'bg-rose-600' : 'bg-transparent'
-          }`}
-        >
-          ✓
-        </span>
-        <span>我已閱讀並同意改期與退款規則（諮詢前 48 小時可免費改期一次）</span>
-      </label>
-      <span id="bk-agree-err" className={errorCls}>
-        {errors.agree ?? ''}
-      </span>
-
-      {payError && (
-        <p id="bk-pay-error" role="alert" tabIndex={-1} className="rounded-[12px] border border-error/25 bg-soft-2 px-4 py-3 text-[14px] leading-[1.8] text-error outline-none">
-          {payError}
-        </p>
-      )}
+      <AgreeField agree={agree} busy={busy} error={errors.agree} onToggle={onToggleAgree} />
+      <PayError message={payError} />
     </div>
   );
 }

@@ -77,3 +77,19 @@ export async function goToPayment(
   nav.post(action, fields);
   return 'redirecting';
 }
+
+/** VIP／商店訂單：POST /payments/ecpay/order-checkout → 綠界信用卡付款頁（失敗丟 ApiError：already_paid / expired…） */
+export async function goToOrderPayment(
+  orderNo: string,
+  client: ApiClient = api,
+  post: (action: string, fields: Record<string, string>) => void = (action, fields) => {
+    submitPostForm(action, fields);
+  },
+): Promise<'redirecting'> {
+  const { action, fields } = await client.orderCheckout(orderNo);
+  if (!isAllowedEcpayAction(action) || !fields || typeof fields !== 'object') {
+    throw new ApiError(502, 'bad_redirect', MSG_BAD_REDIRECT);
+  }
+  post(action, fields);
+  return 'redirecting';
+}

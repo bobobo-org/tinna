@@ -40,6 +40,7 @@ export default function StepDetails({
   onChange,
   qLabel = null,
   qRequired = false,
+  emailNote = null,
   headingRef,
 }: {
   f: BookingForm;
@@ -49,6 +50,8 @@ export default function StepDetails({
   /** 方案自訂的問題欄標題（接住你的諮詢室：「這次的煩惱是什麼？」）；null 用預設 */
   qLabel?: string | null;
   qRequired?: boolean;
+  /** Email 欄的說明（VIP 諮詢：需與購買 VIP 時相同）；null 用預設 */
+  emailNote?: string | null;
   headingRef: Ref<HTMLHeadingElement>;
 }) {
   const inv = (k: keyof FieldErrors) => (errors[k] ? true : undefined);
@@ -184,7 +187,7 @@ export default function StepDetails({
       </div>
 
       <div className={labelWrapCls}>
-        <label htmlFor="bk-email">Email *（寄送視訊連結與收據）</label>
+        <label htmlFor="bk-email">{`Email *（${emailNote ?? '寄送視訊連結與收據'}）`}</label>
         <input
           id="bk-email"
           name="email"

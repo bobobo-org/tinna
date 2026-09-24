@@ -30,7 +30,10 @@ export function toBookingBody(s: {
   topicNote?: string;
   /** 已套用的推薦碼 */
   referral?: string;
+  /** VIP 諮詢：VIP 卡號（有值就用 VIP 堂數預約，不帶推薦碼） */
+  vipCard?: string | null;
 }): CreateBookingBody {
+  const vip = s.vipCard != null;
   return {
     service_id: s.svc,
     date: s.date,
@@ -45,8 +48,9 @@ export function toBookingBody(s: {
     questions: s.f.q.trim(),
     topics: s.topics ?? [],
     topic_note: (s.topicNote ?? '').trim(),
-    referral_code: s.referral ?? '',
-    pay_method: s.pay,
+    referral_code: vip ? '' : (s.referral ?? ''),
+    pay_method: vip ? 'vip' : s.pay,
+    ...(vip ? { vip_card_no: s.vipCard!.trim() } : {}),
     agree: s.agree,
   };
 }
@@ -87,6 +91,7 @@ const API_FIELD_MAP: Record<string, { key: FieldKey; step: Step }> = {
   questions: { key: 'q', step: 3 },
   pay_method: { key: 'pay', step: 4 },
   referral_code: { key: 'ref', step: 4 },
+  vip_card_no: { key: 'vip', step: 4 },
   agree: { key: 'agree', step: 4 },
 };
 

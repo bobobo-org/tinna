@@ -151,7 +151,8 @@ export default function BookingSuccess({ orderNo: rawOrderNo, serverNow }: { ord
   }, [fetchBooking]);
 
   const repay = async () => {
-    if (!b || paying) return;
+    // VIP 堂數預約建立時就已確認，不會走到重新付款
+    if (!b || paying || b.payMethod === 'vip') return;
     setPaying(true);
     setPayError(null);
     try {
@@ -189,7 +190,10 @@ export default function BookingSuccess({ orderNo: rawOrderNo, serverNow }: { ord
     if (status === 'confirmed') {
       mark = '✓';
       title = '預約成功';
-      sub = '確認信與視訊連結已寄到你的 Email。諮詢前一天會再提醒你。';
+      sub =
+        b.payMethod === 'vip'
+          ? '已使用 1 堂 VIP 堂數。確認信與視訊連結已寄到你的 Email，諮詢前一天會再提醒你。'
+          : '確認信與視訊連結已寄到你的 Email。諮詢前一天會再提醒你。';
     } else if (status === 'awaiting_transfer') {
       mark = '✓';
       title = '預約已保留';
@@ -249,7 +253,11 @@ export default function BookingSuccess({ orderNo: rawOrderNo, serverNow }: { ord
             <Row label="訂單編號" value={b.orderNo} />
             <Row label="方案" value={b.service.name} />
             <Row label="時間" value={`${formatDateLabel(b.date)} ${b.time}`} />
-            <Row label={amountLabel} value={formatPrice(b.amount)} />
+            {b.payMethod === 'vip' ? (
+              <Row label="付款方式" value="VIP 堂數（1 堂）" />
+            ) : (
+              <Row label={amountLabel} value={formatPrice(b.amount)} />
+            )}
             {status === 'awaiting_transfer' && b.atm && (
               <>
                 <Row label="虛擬帳號" value={`${b.atm.bankCode}-${b.atm.account}`} />
