@@ -27,6 +27,15 @@ export function pageMetadata({
       url: path,
       title: `${title}｜${SITE_NAME}`,
       description,
+      // 子頁的 openGraph 會整包蓋掉 root，app/opengraph-image.png 不會自動繼承，要明寫
+      images: [
+        {
+          url: '/opengraph-image.png',
+          width: 1200,
+          height: 630,
+          alt: '緣舍命理分享卡：粉色緞面背景搭配珍珠圓標誌，標語「問一個人的命・答一段路的解」',
+        },
+      ],
     },
     ...(noindex ? { robots: { index: false, follow: true } } : {}),
   };

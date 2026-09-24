@@ -39,8 +39,9 @@
 @layer components {
   /*
    * 緞面：全站共用同一組漸層
-   * - 手機（< 760px）：scroll + 100% 100%（iOS Safari 不支援 fixed）
-   * - 桌機：fixed + 100vw 100vh，固定在 viewport，相鄰緞面區塊紋理無縫接續
+   * - 手機（< 760px）與所有觸控裝置：scroll + 100% 100%
+   *   （iOS／iPadOS 不支援 fixed，會退化成 scroll 但尺寸仍是一個視窗高，高區塊會重複貼圖出現接縫）
+   * - 有滑鼠的桌機：fixed + 100vw 100vh，固定在 viewport，相鄰緞面區塊紋理無縫接續
    */
   .satin {
     background-image: theme('backgroundImage.satin');
@@ -48,10 +49,18 @@
     background-size: 100% 100%;
   }
 
-  @media (min-width: theme('screens.md')) {
+  @media (min-width: theme('screens.md')) and (hover: hover) and (pointer: fine) {
     .satin {
       background-attachment: fixed;
       background-size: 100vw 100vh;
+    }
+  }
+
+  /* iPad 接觸控板時也會回報 hover／fine pointer，iOS WebKit 一律退回 scroll */
+  @supports (-webkit-touch-callout: none) {
+    .satin {
+      background-attachment: scroll;
+      background-size: 100% 100%;
     }
   }
 }
