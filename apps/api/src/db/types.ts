@@ -19,6 +19,10 @@ export interface Service {
   shortName: string;
   minutes: number;
   price: number;
+  /** 自選主題的價位：這個價位最多幾題（一般方案為 null） */
+  topicLimit: number | null;
+  /** 預約時「想問的問題」必填（接住你的諮詢室） */
+  questionRequired: boolean;
 }
 
 export interface WeeklySlotRow {

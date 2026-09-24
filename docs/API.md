@@ -60,11 +60,12 @@ apps/api（Railway）與 apps/web（Vercel）之間唯一的介面約定。兩�
 ### `POST /bookings`
 ```json
 {
-  "service_id": "flow | love | career | quick",
+  "service_id": "flow | love | career | quick | listen | topics-4 | topics-6 | topics-8 | topics-15",
   "date": "YYYY-MM-DD", "time": "HH:MM",
   "name": "王小美", "gender": "female | male",
   "birth_date": "YYYY-MM-DD", "birth_time": "HH:MM 或空字串", "birth_place": "",
   "phone": "0912345678", "email": "a@b.co", "questions": "",
+  "topics": ["財運", "工作", "健康", "小孩"], "topic_note": "",
   "pay_method": "card | line | atm",
   "agree": true
 }
@@ -72,6 +73,12 @@ apps/api（Railway）與 apps/web（Vercel）之間唯一的介面約定。兩�
 - 驗證同 README §5.5：姓名非空、生日必填、Email `/^[^@\s]+@[^@\s]+\.[^@\s]+$/`、手機數字 ≥ 9 碼、`agree === true`；另外：性別必填、出生日期不可晚於今天或早於 1900（`fields.birth_date`「請確認出生日期」）
 - 時段必須在老師的時段表內（每週時段 ∪ 加開、未公休、不早於「現在 + 24 小時」）
 - 金額一律取 DB `services.price`，不信任前端
+- 自選主題（`services.topic_limit` 不是 null 的方案，例 `topics-6`）：
+  - `topics`：依優先順序排列的主題（字串、不可重複、最多 15 個）；`topic_note`：備註（最多 500 字）。格式不對 → `fields.topics`「請重新選擇主題」
+  - 題數少於啟用中價位最小的 `topic_limit` → `fields.topics`「請至少選擇 4 個主題」
+  - `service_id` 必須是「`topic_limit` ≥ 題數」最小的價位（例：5 題 → `topics-6`），否則 `fields.topics`「主題數量與方案不符，請重新整理頁面後再選一次」
+  - 主題、備註、`questions` 合併存進 `bookings.questions`（`【自選主題・依優先順序】1. …`），老師的新訂單通知信看得到；其他方案送來的 `topics` 不理會
+- `services.question_required = true` 的方案（`listen` 接住你的諮詢室）：`questions` 必填，空白 → `fields.questions`「請填寫這一欄」
 - 付款方式未開通 → `400 validation`，`fields.pay_method`：「LINE Pay 即將開放，請改用信用卡或 ATM 轉帳」／「信用卡付款即將開放，請改用其他付款方式」／「ATM 轉帳即將開放，請改用其他付款方式」
 - ATM 限制（`400 validation`，`fields.pay_method`）：
   - 開始時間不到 72 小時（`/config` 的 `atmMinLeadHours`）→「ATM 轉帳需於諮詢開始 72 小時前預約，請改用信用卡」

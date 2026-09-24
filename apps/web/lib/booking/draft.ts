@@ -5,6 +5,7 @@
  * - sessionStorage 在無痕模式／被停用時可能丟例外：一律吞掉，只是不存
  */
 
+import { TOPIC_NOTE_MAX, isTopic } from '../topics';
 import type { BookingDraft, BookingForm, Gender, PayMethod, PendingOrder } from './types';
 
 export const DRAFT_KEY = 'yuanshe.booking.v1';
@@ -28,6 +29,8 @@ export const EMPTY_DRAFT: BookingDraft = {
   pay: 'card',
   agree: false,
   order: null,
+  topics: [],
+  topicNote: '',
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -73,6 +76,11 @@ function sanitizeOrder(raw: unknown): PendingOrder | null {
   };
 }
 
+/** 只留認得的主題、去掉重複，保持原本順序（順序＝優先順序） */
+function sanitizeTopics(raw: unknown): string[] {
+  return Array.isArray(raw) ? Array.from(new Set(raw.filter(isTopic))) : [];
+}
+
 export function sanitizeDraft(raw: unknown): BookingDraft {
   if (!raw || typeof raw !== 'object') return EMPTY_DRAFT;
   const r = raw as Record<string, unknown>;
@@ -85,6 +93,8 @@ export function sanitizeDraft(raw: unknown): BookingDraft {
     pay: isPay(r.pay) ? r.pay : 'card',
     agree: r.agree === true,
     order: sanitizeOrder(r.order),
+    topics: sanitizeTopics(r.topics),
+    topicNote: str(r.topicNote, TOPIC_NOTE_MAX),
   };
 }
 

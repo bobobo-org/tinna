@@ -58,7 +58,16 @@ flowchart LR
 - 正式資料在 Supabase 的 **`services`** 表（`name`／`short_name`／`minutes`／`price`／`tagline`／`description`／`includes`／`is_featured`／`sort`／`active` 欄位），直接在 Supabase 後台改這張表即可，不用改程式碼、不用重新部署。
 - 網站前台會快取約 **5 分鐘**（`apps/web/lib/services.ts` 的 `getServices()`），改完 Supabase 後最多等 5 分鐘網站才會顯示新內容。
 - API 建立預約時，金額**一律以 Supabase `services.price` 為準**（`apps/api/src/routes/bookings.ts` 內註明「金額一律取 DB services.price」），不會採信前端送過來的金額，所以改了 DB 價格，實際收費也會跟著改，兩邊不會對不上。
-- `apps/web/lib/services.ts` 裡還有一份 `SVCS` 常數，是網站讀不到 Supabase（沒設環境變數、逾時、或資料格式不對）時的備援文案／價格，目前內容與 `supabase/seed.sql` 的初始值一致，但只是「網站不要壞掉」用的保險，不是價格的正式來源。
+- `apps/web/lib/services.ts` 裡還有一份 `SVCS` 常數，是網站讀不到 Supabase（沒設環境變數、逾時、或資料格式不對）時的備援文案／價格，目前內容與 `supabase/seed.sql`＋`0004` migration 的初始值一致，但只是「網站不要壞掉」用的保險，不是價格的正式來源。
+
+**自選主題（依題數計價）**
+- 每個價位是 `services` 表的一列（`topics-4`／`topics-6`／`topics-8`／`topics-15`），`topic_limit` 是這個價位最多幾題：選 n 題就用 `topic_limit ≥ n` 最小的那一列的 `price` 與 `minutes`；**最少要選幾題 = 啟用中價位裡最小的 `topic_limit`**（目前 4 題）。
+- 改價格／時間：直接改那一列的 `price`／`minutes`。想開放 2 題 NT$1,000：新增一列 `topic_limit = 2`（`short_name` 同樣填「自選主題」），最少題數就會自動變成 2 題。
+- 網站把這幾列合成一張「自選主題」方案卡（卡片名稱用 `short_name`、說明用最低價位的 `tagline`／`description`）；15 個主題的文字在 `apps/web/lib/topics.ts`。
+- 客人勾選的主題（依優先順序）、備註、想問的問題會一起存進預約的 `questions`，老師的新訂單通知信看得到。
+
+**問題欄必填的方案（接住你的諮詢室）**
+- `services` 表的 `question_label` 是預約 Step 3 問題欄的標題（空的用預設「想問的問題」），`question_required = true` 時必填。`listen`（接住你的諮詢室）目前是「這次的煩惱是什麼？」且必填。
 
 **公休／請假／加開時段**
 - Supabase 的 **`date_overrides`** 表，主鍵是 `date`（單一日期）：`closed = true` 表示當天公休或請假；`extra_times` 是當天加開的時段陣列。直接在 Supabase 後台新增／編輯這張表的資料列。
@@ -110,7 +119,7 @@ flowchart LR
 
 ## 7. 資料庫 Migration
 
-- 新增一支 migration：`supabase/migrations/<序號>_<名稱>.sql`，序號是 4 位數遞增（目前只有 `0001_init.sql`，下一支會是 `0002_xxx.sql`）。
+- 新增一支 migration：`supabase/migrations/<序號>_<名稱>.sql`，序號是 4 位數遞增（目前到 `0004_topics_and_listening.sql`，下一支會是 `0005_xxx.sql`；已套用到正式庫的檔案不要再改）。
 - push 到 `main` 後，CI 偵測到 `supabase/migrations/**` 有變動，會自動用 Supabase CLI 執行 `supabase db push` 套用到正式資料庫，不需要手動登入下 SQL（見「3. Push 之後會發生什麼事」）。
 - `supabase/seed.sql`（4 個方案的初始文案價格＋每週固定時段）**只在第一次建置環境時手動執行**，CI 不會自動跑 seed。它對 `services` 表是 `on conflict ... do update`，重新手動執行會把正式庫裡 4 個方案的文案與價格**覆蓋回 seed 檔裡寫死的值**，正式站改過價格後不要隨手重跑。
 

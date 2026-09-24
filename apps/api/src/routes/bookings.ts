@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppDeps } from '../deps';
 import type { BookingPublic, PayMethod } from '../db/types';
 import { BOOKING_LEAD_MS, computeDay, isAllowedMonth } from '../lib/availability';
-import { validateBookingBody } from '../lib/booking-schema';
+import { MSG, validateBookingBody } from '../lib/booking-schema';
 import { apiError, readJsonObject, requestIp } from '../lib/http';
 import { generateOrderNo, isOrderNo } from '../lib/order-no';
 import {
@@ -12,6 +12,7 @@ import {
   MAX_PENDING_PER_CUSTOMER,
 } from '../lib/policy';
 import { rateLimitKey } from '../lib/rate-limit';
+import { composeTopicQuestions } from '../lib/topics';
 import {
   HOUR_MS,
   MINUTE_MS,
@@ -85,6 +86,22 @@ export function bookingRoutes(deps: AppDeps) {
     const service = await deps.db.getActiveService(d.service_id);
     if (!service) return apiError(c, 400, 'validation', '請選擇方案', { service_id: '請選擇方案' });
 
+    let questions = d.questions.trim();
+    if (service.topicLimit !== null) {
+      // 自選主題：價位必須是「topic_limit ≥ 題數」最小的那個（最少題數 = 啟用中價位最小的 topic_limit）
+      const tiers = (await deps.db.listActiveServices())
+        .filter((s) => s.topicLimit !== null)
+        .sort((a, b) => (a.topicLimit ?? 0) - (b.topicLimit ?? 0));
+      const min = tiers[0]?.topicLimit ?? service.topicLimit;
+      const n = d.topics.length;
+      if (n < min) return apiError(c, 400, 'validation', MSG.topicsMin(min), { topics: MSG.topicsMin(min) });
+      const tier = tiers.find((s) => (s.topicLimit ?? 0) >= n);
+      if (tier?.id !== service.id) return apiError(c, 400, 'validation', MSG.topicsTier, { topics: MSG.topicsTier });
+      questions = composeTopicQuestions(d.topics, d.topic_note, questions);
+    } else if (service.questionRequired && !questions) {
+      return apiError(c, 400, 'validation', MSG.questionRequired, { questions: MSG.questionRequired });
+    }
+
     const methodMsg = methodUnavailableMessage(deps, d.pay_method);
     if (methodMsg) return apiError(c, 400, 'validation', methodMsg, { pay_method: methodMsg });
 
@@ -127,7 +144,7 @@ export function bookingRoutes(deps: AppDeps) {
         birthPlace: d.birth_place || null,
         phone: d.phone,
         email: d.email,
-        questions: d.questions.trim() || null,
+        questions: questions || null,
       }, { maxPendingPerCustomer: MAX_PENDING_PER_CUSTOMER, maxPendingAtm: MAX_PENDING_ATM });
       if (r.ok) {
         deps.logger.info('booking.created', {

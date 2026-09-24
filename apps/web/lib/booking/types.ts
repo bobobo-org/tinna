@@ -68,6 +68,10 @@ export interface BookingDraft {
   pay: PayMethod;
   agree: boolean;
   order: PendingOrder | null;
+  /** 自選主題：勾選的主題（依優先順序） */
+  topics: string[];
+  /** 自選主題的備註 */
+  topicNote: string;
 }
 
 // ---------- API 回應（docs/API.md） ----------
@@ -109,6 +113,9 @@ export interface CreateBookingBody {
   phone: string;
   email: string;
   questions: string;
+  /** 自選主題（依優先順序）；其他方案送空陣列 */
+  topics: string[];
+  topic_note: string;
   pay_method: PayMethod;
   agree: boolean;
 }

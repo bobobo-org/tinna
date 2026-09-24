@@ -38,12 +38,17 @@ export default function StepDetails({
   errors,
   today,
   onChange,
+  qLabel = null,
+  qRequired = false,
   headingRef,
 }: {
   f: BookingForm;
   errors: FieldErrors;
   today: string;
   onChange: <K extends keyof BookingForm>(key: K, value: BookingForm[K]) => void;
+  /** 方案自訂的問題欄標題（接住你的諮詢室：「這次的煩惱是什麼？」）；null 用預設 */
+  qLabel?: string | null;
+  qRequired?: boolean;
   headingRef: Ref<HTMLHeadingElement>;
 }) {
   const inv = (k: keyof FieldErrors) => (errors[k] ? true : undefined);
@@ -202,20 +207,24 @@ export default function StepDetails({
       </div>
 
       <div className={labelWrapCls}>
-        <label htmlFor="bk-q">想問的問題（最多三個，讓老師事先準備）</label>
+        <label htmlFor="bk-q">
+          {qLabel ?? '想問的問題（最多三個，讓老師事先準備）'}
+          {qRequired ? ' *' : ''}
+        </label>
         <textarea
           id="bk-q"
           name="questions"
           value={f.q}
           onChange={(e) => onChange('q', e.target.value)}
           rows={4}
-          placeholder="例：今年適合換工作嗎？和伴侶明年適合結婚嗎？"
+          placeholder={qLabel ? '想到什麼就寫什麼，讓我們事先了解你的狀況' : '例：今年適合換工作嗎？和伴侶明年適合結婚嗎？'}
           maxLength={2000}
+          aria-required={qRequired ? 'true' : undefined}
           aria-invalid={inv('q')}
           aria-describedby={desc('q', 'bk-q-err')}
           className={`${inputCls} resize-y`}
         />
-        <ErrorText id="bk-q-err" msg={errors.q} />
+        <ErrorText id="bk-q-err" msg={errors.q} always={qRequired} />
       </div>
     </div>
   );

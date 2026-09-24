@@ -25,6 +25,9 @@ export function toBookingBody(s: {
   f: BookingForm;
   pay: PayMethod;
   agree: boolean;
+  /** 自選主題（依優先順序）；其他方案不給 */
+  topics?: string[];
+  topicNote?: string;
 }): CreateBookingBody {
   return {
     service_id: s.svc,
@@ -38,14 +41,19 @@ export function toBookingBody(s: {
     phone: s.f.phone.trim(),
     email: s.f.email.trim(),
     questions: s.f.q.trim(),
+    topics: s.topics ?? [],
+    topic_note: (s.topicNote ?? '').trim(),
     pay_method: s.pay,
     agree: s.agree,
   };
 }
 
-/** 排盤資料的指紋：從綠界返回後資料沒改才沿用原本的訂單 */
-export function formFingerprint(f: BookingForm): string {
-  return JSON.stringify([
+/**
+ * 排盤資料的指紋：從綠界返回後資料沒改才沿用原本的訂單
+ * 自選主題的題目、順序、備註也算在內（沒選主題時指紋和舊版相同）
+ */
+export function formFingerprint(f: BookingForm, topics: string[] = [], topicNote = ''): string {
+  const parts: unknown[] = [
     f.name.trim(),
     f.gender,
     f.bdate,
@@ -54,12 +62,16 @@ export function formFingerprint(f: BookingForm): string {
     f.phone.trim(),
     f.email.trim(),
     f.q.trim(),
-  ]);
+  ];
+  if (topics.length > 0 || topicNote.trim()) parts.push(topics, topicNote.trim());
+  return JSON.stringify(parts);
 }
 
 /** API 欄位名 → 前端欄位（顯示在哪一步） */
 const API_FIELD_MAP: Record<string, { key: FieldKey; step: Step }> = {
   service_id: { key: 'svc', step: 1 },
+  topics: { key: 'svc', step: 1 },
+  topic_note: { key: 'svc', step: 1 },
   date: { key: 'dt', step: 2 },
   time: { key: 'dt', step: 2 },
   name: { key: 'name', step: 3 },
@@ -105,10 +117,10 @@ export function holdExpired(order: Pick<PendingOrder, 'holdExpiresAt'>, now: num
   return !Number.isNaN(t) && t <= now;
 }
 
-/** 同一個方案、時段、付款方式、排盤資料，且保留未逾時 → 可以直接重新付款 */
+/** 同一個方案、時段、付款方式、排盤資料（含自選主題），且保留未逾時 → 可以直接重新付款 */
 export function canReuseOrder(
   order: PendingOrder | null,
-  s: { svc: string; date: string; time: string; pay: PayMethod; f: BookingForm },
+  s: { svc: string; date: string; time: string; pay: PayMethod; f: BookingForm; topics?: string[]; topicNote?: string },
   now: number = Date.now(),
 ): order is PendingOrder {
   return (
@@ -117,7 +129,7 @@ export function canReuseOrder(
     order.date === s.date &&
     order.time === s.time &&
     order.pay === s.pay &&
-    order.fp === formFingerprint(s.f) &&
+    order.fp === formFingerprint(s.f, s.topics, s.topicNote) &&
     !holdExpired(order, now)
   );
 }

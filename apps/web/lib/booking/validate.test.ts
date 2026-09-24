@@ -103,3 +103,24 @@ describe('步驟退回（網址 step 超前 → 第一個未完成的步驟）',
     expect(clampStep(3, complete, TODAY)).toBe(3);
   });
 });
+
+describe('自選主題與必填問題欄', () => {
+  it('自選主題還差題數 → Step 1 不能按下一步，網址超前會退回 Step 1', () => {
+    const topicsSvc = { ...complete, svc: 'topics-4' };
+    expect(validateStep(1, { ...topicsSvc, topicsShort: 1 }, TODAY)).toEqual({ svc: MSG.topics });
+    expect(canGoNext(1, { ...topicsSvc, topicsShort: 2 }, TODAY)).toBe(false);
+    expect(canGoNext(1, { ...topicsSvc, topicsShort: 0 }, TODAY)).toBe(true);
+    expect(firstIncompleteStep({ ...topicsSvc, topicsShort: 3 }, TODAY)).toBe(1);
+    expect(clampStep(4, { ...topicsSvc, topicsShort: 3 }, TODAY)).toBe(1);
+    expect(clampStep(4, topicsSvc, TODAY)).toBe(4);
+  });
+
+  it('問題欄必填（接住你的諮詢室）：空白不算有填', () => {
+    expect(validateDetails({ ...filled, q: '  ' }, TODAY, true)).toEqual({ q: MSG.qRequired });
+    expect(validateDetails({ ...filled, q: '最近和家人處不好' }, TODAY, true)).toEqual({});
+    expect(validateDetails(filled, TODAY)).toEqual({});
+    expect(validateStep(3, { ...complete, qRequired: true }, TODAY)).toEqual({ q: MSG.qRequired });
+    expect(clampStep(4, { ...complete, qRequired: true }, TODAY)).toBe(3);
+    expect(firstErrorField({ q: MSG.qRequired, agree: MSG.agree })).toBe('q');
+  });
+});

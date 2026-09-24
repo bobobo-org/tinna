@@ -1,23 +1,24 @@
 /**
  * 諮詢方案資料
  *
- * - SVCS：逐字複製自 design/site.dc.html 的 SVCS（DB 沒設定或讀取失敗時的備援）
+ * - SVCS：原本 4 個方案逐字複製自 design/site.dc.html 的 SVCS，另加 0004 migration 的方案（DB 沒設定或讀取失敗時的備援）
  * - getServices()：有 Supabase env 時讀 services 表（anon key + RLS，只回 active），5 分鐘 revalidate
  *
- * 欄位對照（DB → 前端）：short_name → short、description → desc、is_featured → featured
- * num（壹貳參肆）不存 DB，依排序位置產生
+ * 欄位對照（DB → 前端）：short_name → short、description → desc、is_featured → featured、
+ * topic_limit → topicLimit、question_label → questionLabel、question_required → questionRequired
+ * num（壹貳參肆）不存 DB，依排序位置產生；自選主題的幾個價位合成一張卡，共用一個編號
  */
 
-export type ServiceId = 'flow' | 'love' | 'career' | 'quick';
+export type ServiceId = 'flow' | 'love' | 'career' | 'quick' | 'listen';
 
 export interface Service {
-  /** flow | love | career | quick（DB 若新增方案會是其他字串） */
+  /** flow | love | career | quick | listen | topics-*（DB 若新增方案會是其他字串） */
   id: ServiceId | (string & {});
   /** 壹、貳、參、肆…（依排序位置） */
   num: string;
   /** 完整名稱：流年運勢盤 */
   name: string;
-  /** 短名：流年 · 大限（首頁三格用） */
+  /** 短名：流年 · 大限（首頁三格用）；自選主題的價位共用短名當方案卡名稱 */
   short: string;
   minutes: number;
   /** 新台幣整數 */
@@ -27,9 +28,18 @@ export interface Service {
   includes: string[];
   /** 推薦（最多人選）：方案卡緞面底＋徽章、首頁上緣 3px */
   featured: boolean;
+  /** 自選主題的價位：這個價位最多幾題（一般方案為 null） */
+  topicLimit: number | null;
+  /** Step 3 問題欄的標題（null 用預設「想問的問題」） */
+  questionLabel: string | null;
+  /** Step 3 問題欄必填 */
+  questionRequired: boolean;
 }
 
-/** Supabase services 表的一列（DEPLOYMENT.md §3） */
+/** 自選主題的一個價位 */
+export type TopicTier = Service & { topicLimit: number };
+
+/** Supabase services 表的一列（DEPLOYMENT.md §3；後三個欄位來自 0004） */
 export interface ServiceRow {
   id: string;
   name: string;
@@ -42,6 +52,9 @@ export interface ServiceRow {
   is_featured: boolean | null;
   sort: number | null;
   active: boolean | null;
+  topic_limit?: number | null;
+  question_label?: string | null;
+  question_required?: boolean | null;
 }
 
 const NUMERALS = ['壹', '貳', '參', '肆', '伍', '陸', '柒', '捌', '玖', '拾'];
@@ -52,8 +65,31 @@ export function toNumeral(index: number): string {
 
 type ServiceSeed = Omit<Service, 'num'>;
 
+const PLAN = { topicLimit: null, questionLabel: null, questionRequired: false } as const;
+
+const TOPIC_TAGLINE = '從 15 個主題自由勾選，依題數計價。';
+const TOPIC_DESC =
+  '從個性、感情、財運、工作到晚年運等 15 個主題中勾選想問的方向；勾選的先後就是你的優先順序，老師會先解答最想知道的。';
+
+function topicSeed(limit: number, name: string, minutes: number, price: number): ServiceSeed {
+  return {
+    ...PLAN,
+    id: `topics-${limit}`,
+    short: '自選主題',
+    name,
+    minutes,
+    price,
+    featured: false,
+    tagline: TOPIC_TAGLINE,
+    desc: TOPIC_DESC,
+    includes: [],
+    topicLimit: limit,
+  };
+}
+
 const SEED: ServiceSeed[] = [
   {
+    ...PLAN,
     id: 'flow',
     short: '流年 · 大限',
     name: '流年運勢盤',
@@ -65,6 +101,7 @@ const SEED: ServiceSeed[] = [
     includes: ['紫微 × 八字合參排盤', '十二個月逐月重點', '錄影檔 + 行動筆記'],
   },
   {
+    ...PLAN,
     id: 'love',
     short: '姻緣 · 合盤',
     name: '感情合盤',
@@ -76,6 +113,7 @@ const SEED: ServiceSeed[] = [
     includes: ['雙人命盤對照', '相處模式與卡點', '適合的結婚／同居時機'],
   },
   {
+    ...PLAN,
     id: 'career',
     short: '事業 · 擇時',
     name: '事業／擇時',
@@ -87,6 +125,7 @@ const SEED: ServiceSeed[] = [
     includes: ['事業格局分析', '三個吉日吉時建議', '合作對象簡易對盤'],
   },
   {
+    ...PLAN,
     id: 'quick',
     short: '單題快問',
     name: '單題快問',
@@ -97,13 +136,38 @@ const SEED: ServiceSeed[] = [
     desc: '只有一個具體問題想釐清，短時段聚焦回答。',
     includes: ['單一問題深入解析', '錄影檔', '適合回訪學員'],
   },
+  {
+    ...PLAN,
+    id: 'listen',
+    short: '接住你',
+    name: '接住你的諮詢室',
+    minutes: 60,
+    price: 5800,
+    featured: false,
+    tagline: '先把心裡的話說出來，我們好好聽你說。',
+    desc: '以傾聽為主的一對一諮詢：預約時先寫下這次的煩惱，諮詢時陪你把心裡的事慢慢說完、理清楚。',
+    includes: ['預約時先寫下這次的煩惱', '一對一傾聽與陪伴', '付款後即確認時段'],
+    questionLabel: '這次的煩惱是什麼？',
+    questionRequired: true,
+  },
+  topicSeed(4, '自選主題（4 題）', 60, 2000),
+  topicSeed(6, '自選主題（5～6 題）', 75, 2600),
+  topicSeed(8, '自選主題（7～8 題）', 90, 3000),
+  topicSeed(15, '自選主題（9～15 題）', 120, 3600),
 ];
 
+/** 依排序編號；自選主題的價位共用第一個價位的編號（畫面上是同一張卡） */
 function withNumerals(list: ServiceSeed[]): Service[] {
-  return list.map((s, i) => ({ ...s, num: toNumeral(i) }));
+  let next = 0;
+  let topicNum: string | null = null;
+  return list.map((s) => {
+    if (s.topicLimit === null) return { ...s, num: toNumeral(next++) };
+    if (topicNum === null) topicNum = toNumeral(next++);
+    return { ...s, num: topicNum };
+  });
 }
 
-/** 靜態方案資料（原型 SVCS） */
+/** 靜態方案資料（原型 SVCS＋0004 的方案） */
 export const SVCS: Service[] = withNumerals(SEED);
 
 /** NT$2,800（和原型 'NT$' + n.toLocaleString() 相同；固定 en-US 避免伺服器語系不同） */
@@ -121,7 +185,10 @@ function isServiceRow(v: unknown): v is ServiceRow {
     typeof r.short_name === 'string' &&
     typeof r.minutes === 'number' &&
     typeof r.price === 'number' &&
-    (r.includes == null || (Array.isArray(r.includes) && r.includes.every((x) => typeof x === 'string')))
+    (r.includes == null || (Array.isArray(r.includes) && r.includes.every((x) => typeof x === 'string'))) &&
+    (r.topic_limit == null || typeof r.topic_limit === 'number') &&
+    (r.question_label == null || typeof r.question_label === 'string') &&
+    (r.question_required == null || typeof r.question_required === 'boolean')
   );
 }
 
@@ -143,6 +210,9 @@ export function mapServiceRows(rows: unknown): Service[] | null {
       desc: r.description ?? '',
       includes: r.includes ?? [],
       featured: r.is_featured === true,
+      topicLimit: r.topic_limit ?? null,
+      questionLabel: r.question_label?.trim() ? r.question_label : null,
+      questionRequired: r.question_required === true,
     })),
   );
 }
@@ -189,4 +259,33 @@ export function findService(services: Service[], id: string | null | undefined):
 /** 最低價（手機浮動 CTA「NT$1,500 起」） */
 export function minPrice(services: Service[]): number {
   return services.reduce((min, s) => Math.min(min, s.price), Number.POSITIVE_INFINITY);
+}
+
+// ---------- 自選主題 ----------
+
+export function isTopicTier(s: Service | undefined): s is TopicTier {
+  return s != null && s.topicLimit !== null;
+}
+
+/** 自選主題的價位（topicLimit 由小到大） */
+export function topicTiers(services: Service[]): TopicTier[] {
+  return services.filter(isTopicTier).sort((a, b) => a.topicLimit - b.topicLimit);
+}
+
+/** 可選題數：最少 = 最低價位的上限（例：4 題起）、最多 = 最高價位的上限 */
+export function topicRange(tiers: TopicTier[]): { min: number; max: number } | null {
+  if (tiers.length === 0) return null;
+  return { min: tiers[0].topicLimit, max: tiers[tiers.length - 1].topicLimit };
+}
+
+/** n 題對應的價位：topicLimit ≥ n 的最小者（還沒選到最少題數時是最低價位，用來顯示「起」價） */
+export function tierFor(tiers: TopicTier[], n: number): TopicTier | undefined {
+  return tiers.find((t) => t.topicLimit >= n);
+}
+
+/** 價位涵蓋的題數：「4 題」「5～6 題」 */
+export function tierRangeLabel(tiers: TopicTier[], index: number): string {
+  const hi = tiers[index].topicLimit;
+  const lo = index === 0 ? hi : tiers[index - 1].topicLimit + 1;
+  return lo === hi ? `${hi} 題` : `${lo}～${hi} 題`;
 }

@@ -20,6 +20,10 @@ export const dateTimeCls =
 
 export const errorCls = 'text-[12px] text-error';
 
+/** 按鈕本身的鍵盤焦點框（主題選擇等） */
+export const focusRing =
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-600';
+
 /** 珍珠圓 radio／勾選框：18px＋2px 框（content-box → 外框 22px，和原型一樣） */
 export const focusRingWithin =
   'has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-rose-600';

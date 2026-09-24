@@ -19,6 +19,10 @@ export const MSG = {
   phone: '請填寫手機號碼',
   payMethod: '請選擇付款方式',
   agree: '請勾選同意改期與退款規則',
+  topics: '請重新選擇主題',
+  topicsMin: (n: number) => `請至少選擇 ${n} 個主題`,
+  topicsTier: '主題數量與方案不符，請重新整理頁面後再選一次',
+  questionRequired: '請填寫這一欄',
   tooLong: (n: number) => `請勿超過 ${n} 字`,
 } as const;
 
@@ -52,6 +56,20 @@ export const bookingBodySchema = z.object({
   questions: z
     .string({ invalid_type_error: MSG.tooLong(2000) })
     .max(2000, MSG.tooLong(2000))
+    .optional()
+    .default(''),
+  // 自選主題：依優先順序排列；題數是否符合價位在 route 內對照 services.topic_limit 檢查
+  topics: z
+    .array(z.string({ invalid_type_error: MSG.topics }).trim().min(1, MSG.topics).max(30, MSG.topics), {
+      invalid_type_error: MSG.topics,
+    })
+    .max(15, MSG.topics)
+    .refine((a) => new Set(a).size === a.length, MSG.topics)
+    .optional()
+    .default([]),
+  topic_note: z
+    .string({ invalid_type_error: MSG.tooLong(500) })
+    .max(500, MSG.tooLong(500))
     .optional()
     .default(''),
   pay_method: z.enum(['card', 'line', 'atm'], { errorMap: () => ({ message: MSG.payMethod }) }),

@@ -26,7 +26,7 @@ import type {
   Step,
 } from '@/lib/booking/types';
 import { canGoNext, clampStep, firstErrorField, validateStep, type ValidationInput } from '@/lib/booking/validate';
-import { findService, formatPrice, type Service } from '@/lib/services';
+import { findService, formatPrice, isTopicTier, tierFor, topicRange, topicTiers, type Service } from '@/lib/services';
 import { MobileBar, SummaryCard, type SummaryValues } from './BookingSummary';
 import StepDetails from './StepDetails';
 import StepPayment from './StepPayment';
@@ -83,6 +83,9 @@ export default function BookingFlow({ services, serverNow }: { services: Service
 
   // ---------- state（原型 state） ----------
   const validSvc = useCallback((id: string | null) => (id && findService(services, id) ? id : null), [services]);
+  // 自選主題：幾個價位（services 的幾列）依題數切換
+  const tiers = useMemo(() => topicTiers(services), [services]);
+  const range = useMemo(() => topicRange(tiers), [tiers]);
   const [svc, setSvc] = useState<string | null>(() => validSvc(searchParams.get('svc')));
   const [step, setStep] = useState<Step>(() => (validSvc(searchParams.get('svc')) ? parseStep(searchParams.get('step')) : 1));
   const [date, setDate] = useState<string | null>(null);
@@ -91,6 +94,9 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   const [pay, setPay] = useState<PayMethod>('card');
   const [agree, setAgree] = useState(false);
   const [order, setOrder] = useState<PendingOrder | null>(null);
+  const [topics, setTopics] = useState<string[]>([]);
+  const [topicNote, setTopicNote] = useState('');
+  const [svcNotice, setSvcNotice] = useState<string | null>(null);
   const [err, setErr] = useState<FieldErrors>({});
   const [paying, setPaying] = useState(false);
   const [sumOpen, setSumOpen] = useState(false);
@@ -103,6 +109,9 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   const [focusReq, setFocusReq] = useState<{ id: string; n: number } | null>(null);
 
   const service = findService(services, svc);
+  const isTier = isTopicTier(service);
+  const topicsShort = isTier && range ? Math.max(0, range.min - topics.length) : 0;
+  const qRequired = service?.questionRequired === true;
   const cardRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const submitting = useRef(false);
@@ -111,10 +120,20 @@ export default function BookingFlow({ services, serverNow }: { services: Service
 
   // 付款方式：config 開通狀態＋ATM 需在諮詢開始 atmMinLeadHours 小時前（以伺服器時間計）
   const payAv = payAvailability(config, date, time, nowMs);
-  const vin: ValidationInput = { svc: service ? svc : null, date, time, f, pay, agree, payEnabled: payAv.enabled };
+  const vin: ValidationInput = {
+    svc: service ? svc : null,
+    date,
+    time,
+    f,
+    pay,
+    agree,
+    payEnabled: payAv.enabled,
+    topicsShort,
+    qRequired,
+  };
   // 讓 effect／非同步流程讀到最新值（不必把每個 state 都列進 deps）
-  const latest = useRef({ svc, step, date, time, f, pay, agree, order, vin, today });
-  latest.current = { svc, step, date, time, f, pay, agree, order, vin, today };
+  const latest = useRef({ svc, step, date, time, f, pay, agree, order, topics, topicNote, vin, today });
+  latest.current = { svc, step, date, time, f, pay, agree, order, topics, topicNote, vin, today };
 
   const requestFocus = useCallback((id: string) => setFocusReq((p) => ({ id, n: (p?.n ?? 0) + 1 })), []);
 
@@ -142,6 +161,7 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     (target: Step) => {
       setErr({});
       setNotice(null);
+      setSvcNotice(null);
       setPayError(null);
       setPayNotice(null);
       setStep(target);
@@ -204,6 +224,7 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     let nextDate: string | null = null;
     let nextTime: string | null = null;
     let nextF = cur.f;
+    let nextTopics: string[] = [];
     if (d) {
       if (!nextSvc) nextSvc = validSvc(d.svc);
       const off = d.date ? monthDiff(base, d.date.slice(0, 7)) : Number.NaN;
@@ -220,11 +241,26 @@ export default function BookingFlow({ services, serverNow }: { services: Service
       setPay(d.pay);
       setAgree(d.agree);
       setOrder(d.order);
+      nextTopics = d.topics;
+      setTopics(d.topics);
+      setTopicNote(d.topicNote);
     }
+    // 自選主題：價位跟著還原的題數走（網址帶的價位可能和題數不符）
+    if (isTopicTier(findService(services, nextSvc))) nextSvc = tierFor(tiers, nextTopics.length)?.id ?? nextSvc;
+    const nextService = findService(services, nextSvc);
     const requested = nextSvc ? cur.step : 1;
     const nextStep = clampStep(
       requested,
-      { svc: nextSvc, date: nextDate, time: nextTime, f: nextF, pay: 'card', agree: false },
+      {
+        svc: nextSvc,
+        date: nextDate,
+        time: nextTime,
+        f: nextF,
+        pay: 'card',
+        agree: false,
+        topicsShort: isTopicTier(nextService) && range ? Math.max(0, range.min - nextTopics.length) : 0,
+        qRequired: nextService?.questionRequired === true,
+      },
       todayNow,
     );
     setSvc(nextSvc);
@@ -247,13 +283,22 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     }
     // vin 每次 render 都是新物件：改列出實際影響判斷的欄位
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [restored, step, svc, date, time, f, today, writeUrl]);
+  }, [restored, step, svc, date, time, f, today, writeUrl, topics]);
+
+  // 自選主題：方案（價位）一律跟著題數走（加減主題、瀏覽器上一頁帶回舊的價位都會對齊）
+  useEffect(() => {
+    if (!restored || !isTier) return;
+    const want = tierFor(tiers, topics.length)?.id;
+    if (!want || want === svc) return;
+    setSvc(want);
+    writeUrl(want, step, 'replace');
+  }, [restored, isTier, tiers, topics.length, svc, step, writeUrl]);
 
   // 存草稿（關分頁即清）
   useEffect(() => {
     if (!restored) return;
-    saveDraft({ svc, date, time, f, pay, agree, order });
-  }, [restored, svc, date, time, f, pay, agree, order]);
+    saveDraft({ svc, date, time, f, pay, agree, order, topics, topicNote });
+  }, [restored, svc, date, time, f, pay, agree, order, topics, topicNote]);
 
   // 從綠界按返回（bfcache 還原）：解除「付款處理中…」
   useEffect(() => {
@@ -354,9 +399,26 @@ export default function BookingFlow({ services, serverNow }: { services: Service
 
   // ---------- 動作 ----------
   const pickSvc = (id: string) => {
-    setSvc(id);
-    writeUrl(id, 1, 'replace');
+    // 自選主題：依目前已選的題數對應價位
+    const next = isTopicTier(findService(services, id)) ? (tierFor(tiers, topics.length)?.id ?? id) : id;
+    setSvc(next);
+    setSvcNotice(null);
+    writeUrl(next, 1, 'replace');
   };
+
+  /** 點主題：沒選過就排到最後（先點的優先），選過就取消；滿了不能再加 */
+  const toggleTopic = (topic: string) => {
+    setSvcNotice(null);
+    setTopics((prev) => {
+      if (prev.includes(topic)) return prev.filter((t) => t !== topic);
+      if (range && prev.length >= range.max) return prev;
+      return [...prev, topic];
+    });
+  };
+
+  /** 送出的主題：只有自選主題才帶 */
+  const topicPayload = (c: { svc: string | null; topics: string[]; topicNote: string }) =>
+    isTopicTier(findService(services, c.svc)) ? { topics: c.topics, topicNote: c.topicNote } : { topics: [], topicNote: '' };
 
   const pickDate = (d: string) => {
     setDate(d);
@@ -398,7 +460,8 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     const m = mapApiFieldErrors(e.fields);
     if (m.step <= 2) {
       goBackTo(m.step);
-      setNotice(e.message);
+      if (m.step === 1) setSvcNotice(e.message);
+      else setNotice(e.message);
       return;
     }
     if (m.step === 3) {
@@ -450,8 +513,9 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     if (!cur.svc || !cur.date || !cur.time) return failPayment('請重新選擇方案與時段');
     if (reuse) return redirectToPayment(reuse, retried);
     try {
+      const tp = topicPayload(cur);
       const res = await api.createBooking(
-        toBookingBody({ svc: cur.svc, date: cur.date, time: cur.time, f: cur.f, pay: cur.pay, agree: cur.agree }),
+        toBookingBody({ svc: cur.svc, date: cur.date, time: cur.time, f: cur.f, pay: cur.pay, agree: cur.agree, ...tp }),
       );
       const o: PendingOrder = {
         orderNo: res.orderNo,
@@ -461,11 +525,21 @@ export default function BookingFlow({ services, serverNow }: { services: Service
         pay: res.payMethod ?? cur.pay,
         amount: res.amount,
         holdExpiresAt: res.holdExpiresAt ?? null,
-        fp: formFingerprint(cur.f),
+        fp: formFingerprint(cur.f, tp.topics, tp.topicNote),
       };
       setOrder(o);
       // 馬上寫進 sessionStorage：下一刻就要離開頁面，等不到 effect
-      saveDraft({ svc: cur.svc, date: cur.date, time: cur.time, f: cur.f, pay: cur.pay, agree: cur.agree, order: o });
+      saveDraft({
+        svc: cur.svc,
+        date: cur.date,
+        time: cur.time,
+        f: cur.f,
+        pay: cur.pay,
+        agree: cur.agree,
+        order: o,
+        topics: cur.topics,
+        topicNote: cur.topicNote,
+      });
       return redirectToPayment(o, retried);
     } catch (e) {
       if (!(e instanceof ApiError)) return failPayment(MSG_NETWORK);
@@ -506,7 +580,11 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     submitting.current = true;
     setPaying(true);
     setPayError(null);
-    const reuse = canReuseOrder(cur.order, { svc: cur.svc, date: cur.date, time: cur.time, pay: cur.pay, f: cur.f }, now())
+    const reuse = canReuseOrder(
+      cur.order,
+      { svc: cur.svc, date: cur.date, time: cur.time, pay: cur.pay, f: cur.f, ...topicPayload(cur) },
+      now(),
+    )
       ? cur.order
       : null;
     void createAndPay(reuse);
@@ -543,7 +621,7 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   const nextLabel = paying ? '付款處理中…' : step === 4 ? (pay === 'atm' ? '取得轉帳帳號' : `確認付款 ${service ? price : ''}`) : '下一步';
   const nextLabelM = paying ? '處理中…' : step === 4 ? (pay === 'atm' ? '取得帳號' : '確認付款') : '下一步';
   const sum: SummaryValues = {
-    svc: service ? service.name : '尚未選擇',
+    svc: service ? (isTier ? `${service.short}（${topics.length} 題）` : service.name) : '尚未選擇',
     date: formatDateLabel(date),
     time: time || '—',
     price,
@@ -561,7 +639,19 @@ export default function BookingFlow({ services, serverNow }: { services: Service
               ref={cardRef}
               className="box-content flex min-w-0 flex-[2_1_480px] flex-col gap-[22px] rounded-[20px] border border-rose-600/[.16] bg-white px-4 py-5 shadow-form md:p-8"
             >
-              {step === 1 && <StepService services={services} selected={svc} onPick={pickSvc} headingRef={headingRef} />}
+              {step === 1 && (
+                <StepService
+                  services={services}
+                  selected={svc}
+                  onPick={pickSvc}
+                  topics={topics}
+                  onToggleTopic={toggleTopic}
+                  topicNote={topicNote}
+                  onTopicNote={setTopicNote}
+                  notice={svcNotice}
+                  headingRef={headingRef}
+                />
+              )}
               {step === 2 && (
                 <StepSchedule
                   month={month}
@@ -580,7 +670,17 @@ export default function BookingFlow({ services, serverNow }: { services: Service
                   headingRef={headingRef}
                 />
               )}
-              {step === 3 && <StepDetails f={f} errors={err} today={today} onChange={setField} headingRef={headingRef} />}
+              {step === 3 && (
+                <StepDetails
+                  f={f}
+                  errors={err}
+                  today={today}
+                  onChange={setField}
+                  qLabel={service?.questionLabel ?? null}
+                  qRequired={qRequired}
+                  headingRef={headingRef}
+                />
+              )}
               {step === 4 && (
                 <StepPayment
                   pay={pay}

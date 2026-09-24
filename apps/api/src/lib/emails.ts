@@ -53,7 +53,7 @@ function rows(items: [string, string][]): string {
   return `<table style="width:100%;border-collapse:collapse;font-size:15px;line-height:1.9">${items
     .map(
       ([k, v]) =>
-        `<tr><td style="color:#a06a80;padding:4px 12px 4px 0;white-space:nowrap;vertical-align:top">${esc(k)}</td><td style="color:#63142f;padding:4px 0">${esc(v)}</td></tr>`,
+        `<tr><td style="color:#a06a80;padding:4px 12px 4px 0;white-space:nowrap;vertical-align:top">${esc(k)}</td><td style="color:#63142f;padding:4px 0;white-space:pre-line">${esc(v)}</td></tr>`,
     )
     .join('')}</table>`;
 }

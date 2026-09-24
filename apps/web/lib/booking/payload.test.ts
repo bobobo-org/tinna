@@ -29,10 +29,27 @@ describe('toBookingBody', () => {
       phone: '0912 345 678',
       email: 'a@b.co',
       questions: '今年適合換工作嗎？',
+      topics: [],
+      topic_note: '',
       pay_method: 'atm',
       agree: true,
     });
     expect(toBookingBody({ svc: 'flow', date: 'd', time: 't', f: EMPTY_FORM, pay: 'card', agree: true }).gender).toBe('female');
+  });
+
+  it('自選主題：主題照優先順序送出、備註 trim', () => {
+    const b = toBookingBody({
+      svc: 'topics-6',
+      date: '2026-10-07',
+      time: '19:00',
+      f,
+      pay: 'card',
+      agree: true,
+      topics: ['財運', '工作', '健康', '小孩', '其他'],
+      topicNote: ' 想問搬家 ',
+    });
+    expect(b.topics).toEqual(['財運', '工作', '健康', '小孩', '其他']);
+    expect(b.topic_note).toBe('想問搬家');
   });
 });
 
@@ -45,6 +62,8 @@ describe('mapApiFieldErrors（400 validation → 欄位與步驟）', () => {
     });
     expect(mapApiFieldErrors({ time: '請選擇時段' }).step).toBe(2);
     expect(mapApiFieldErrors({ service_id: '請選擇方案', name: 'x' }).step).toBe(1);
+    expect(mapApiFieldErrors({ topics: '請至少選擇 4 個主題' })).toEqual({ errors: { svc: '請至少選擇 4 個主題' }, step: 1, unknown: [] });
+    expect(mapApiFieldErrors({ questions: '請填寫這一欄' })).toEqual({ errors: { q: '請填寫這一欄' }, step: 3, unknown: [] });
     expect(mapApiFieldErrors({ pay_method: 'LINE Pay 即將開放' })).toEqual({ errors: { pay: 'LINE Pay 即將開放' }, step: 4, unknown: [] });
   });
   it('認不得的欄位留在 Step 4 當整體訊息', () => {
@@ -79,6 +98,16 @@ describe('沿用訂單（從綠界返回後重新付款）', () => {
     expect(canReuseOrder(order, { ...same, svc: 'flow' }, now)).toBe(false);
     expect(canReuseOrder(order, { ...same, f: { ...f, email: 'c@d.co' } }, now)).toBe(false);
     expect(canReuseOrder(order, same, Date.parse('2026-09-24T12:15:00+08:00'))).toBe(false);
+  });
+  it('自選主題：主題、順序、備註都一樣才沿用；沒選主題時指紋和舊版相同', () => {
+    expect(formFingerprint(f, [], '  ')).toBe(formFingerprint(f));
+    const topics = ['財運', '工作', '健康', '小孩'];
+    const withTopics = { ...order, svc: 'topics-4', fp: formFingerprint(f, topics, '備註') };
+    const s = { ...same, svc: 'topics-4', topics, topicNote: ' 備註 ' };
+    expect(canReuseOrder(withTopics, s, now)).toBe(true);
+    expect(canReuseOrder(withTopics, { ...s, topics: ['工作', '財運', '健康', '小孩'] }, now)).toBe(false);
+    expect(canReuseOrder(withTopics, { ...s, topicNote: '別的' }, now)).toBe(false);
+    expect(canReuseOrder(withTopics, { ...s, topics: [], topicNote: '' }, now)).toBe(false);
   });
   it('holdExpired / isOwnHold', () => {
     expect(holdExpired({ holdExpiresAt: null }, now)).toBe(false);
@@ -127,6 +156,13 @@ describe('sessionStorage 草稿', () => {
     expect(loadDraft(null)).toBeNull();
     // 訂單編號格式不對就不沿用
     expect(sanitizeDraft({ order: { orderNo: 'hack', svc: 'love', date: '2026-10-07', time: '19:00', pay: 'card' } }).order).toBeNull();
+  });
+
+  it('自選主題：只留認得的主題、去重、保持順序；備註限 500 字', () => {
+    const d = sanitizeDraft({ topics: ['財運', 'hack', '工作', '財運', 3, '其他'], topicNote: 'x'.repeat(600) });
+    expect(d.topics).toEqual(['財運', '工作', '其他']);
+    expect(d.topicNote).toHaveLength(500);
+    expect(sanitizeDraft({ topics: '財運' }).topics).toEqual([]);
   });
 
   it('storage 丟例外不會讓頁面壞掉', () => {

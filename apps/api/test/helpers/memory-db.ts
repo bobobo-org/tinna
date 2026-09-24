@@ -86,11 +86,19 @@ export interface MemPayment {
   attentionReason: string | null;
 }
 
+const PLAN = { topicLimit: null, questionRequired: false, active: true };
+
 export const SEED_SERVICES: (Service & { active: boolean })[] = [
-  { id: 'flow', name: '流年運勢盤', shortName: '流年 · 大限', minutes: 60, price: 2800, active: true },
-  { id: 'love', name: '感情合盤', shortName: '姻緣 · 合盤', minutes: 90, price: 3600, active: true },
-  { id: 'career', name: '事業／擇時', shortName: '事業 · 擇時', minutes: 75, price: 3200, active: true },
-  { id: 'quick', name: '單題快問', shortName: '單題快問', minutes: 30, price: 1500, active: true },
+  { ...PLAN, id: 'flow', name: '流年運勢盤', shortName: '流年 · 大限', minutes: 60, price: 2800 },
+  { ...PLAN, id: 'love', name: '感情合盤', shortName: '姻緣 · 合盤', minutes: 90, price: 3600 },
+  { ...PLAN, id: 'career', name: '事業／擇時', shortName: '事業 · 擇時', minutes: 75, price: 3200 },
+  { ...PLAN, id: 'quick', name: '單題快問', shortName: '單題快問', minutes: 30, price: 1500 },
+  // 0004：接住你的諮詢室、自選主題的四個價位
+  { ...PLAN, id: 'listen', name: '接住你的諮詢室', shortName: '接住你', minutes: 60, price: 5800, questionRequired: true },
+  { ...PLAN, id: 'topics-4', name: '自選主題（4 題）', shortName: '自選主題', minutes: 60, price: 2000, topicLimit: 4 },
+  { ...PLAN, id: 'topics-6', name: '自選主題（5～6 題）', shortName: '自選主題', minutes: 75, price: 2600, topicLimit: 6 },
+  { ...PLAN, id: 'topics-8', name: '自選主題（7～8 題）', shortName: '自選主題', minutes: 90, price: 3000, topicLimit: 8 },
+  { ...PLAN, id: 'topics-15', name: '自選主題（9～15 題）', shortName: '自選主題', minutes: 120, price: 3600, topicLimit: 15 },
 ];
 
 export const SEED_WEEKLY: WeeklySlotRow[] = [0, 2, 3, 4, 5, 6].flatMap((weekday) =>

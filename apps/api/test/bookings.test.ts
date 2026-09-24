@@ -270,3 +270,86 @@ describe('GET /bookings/:orderNo', () => {
     expect(text).toContain('booking.created');
   });
 });
+
+describe('POST /bookings：自選主題（依題數計價）', () => {
+  const five = ['財運', '工作', '健康', '小孩', '其他'];
+
+  it('金額與時間取題數對應的價位；主題依順序＋備註＋問題寫進 questions', async () => {
+    const h = makeHarness({ now: NOW });
+    const res = await postJson(h, '/bookings', { ...valid, service_id: 'topics-6', topics: five, topic_note: ' 其他想問搬家 ' });
+    expect(res.status).toBe(201);
+    const b = await body(res);
+    expect(b.amount).toBe(2600);
+    const row = h.db.booking(b.orderNo)!;
+    expect(row.amount).toBe(2600);
+    expect(row.endsAt.getTime() - row.startsAt.getTime()).toBe(75 * 60_000);
+    expect(row.questions).toBe(
+      '【自選主題・依優先順序】\n1. 財運\n2. 工作\n3. 健康\n4. 小孩\n5. 其他\n\n【備註】\n其他想問搬家\n\n【想問的問題】\n今年感情？',
+    );
+  });
+
+  it('沒有備註與問題時只存主題；剛好 4 題用最低價位', async () => {
+    const h = makeHarness({ now: NOW });
+    const b = await body(
+      await postJson(h, '/bookings', { ...valid, service_id: 'topics-4', topics: five.slice(0, 4), questions: '' }),
+    );
+    expect(b.amount).toBe(2000);
+    expect(h.db.booking(b.orderNo)!.questions).toBe('【自選主題・依優先順序】\n1. 財運\n2. 工作\n3. 健康\n4. 小孩');
+  });
+
+  it('少於最低題數（啟用中價位最小的 topic_limit）→ 400 fields.topics', async () => {
+    const h = makeHarness({ now: NOW });
+    const res = await postJson(h, '/bookings', { ...valid, service_id: 'topics-4', topics: five.slice(0, 3) });
+    expect(res.status).toBe(400);
+    expect((await body(res)).fields.topics).toBe('請至少選擇 4 個主題');
+    expect(h.db.bookings).toHaveLength(0);
+  });
+
+  it('價位和題數不符（低價位送更多題、高價位送太少題）→ 400 fields.topics', async () => {
+    for (const [serviceId, topics] of [
+      ['topics-4', five],
+      ['topics-15', five],
+    ] as const) {
+      const h = makeHarness({ now: NOW });
+      const res = await postJson(h, '/bookings', { ...valid, service_id: serviceId, topics });
+      expect(res.status).toBe(400);
+      expect((await body(res)).fields.topics).toBe('主題數量與方案不符，請重新整理頁面後再選一次');
+      expect(h.db.bookings).toHaveLength(0);
+    }
+  });
+
+  it('主題重複、不是字串陣列、超過 15 題 → 400 fields.topics', async () => {
+    for (const topics of [['財運', '財運', '工作', '健康'], '財運', [1, 2, 3, 4], Array.from({ length: 16 }, (_, i) => `主題${i}`)]) {
+      const h = makeHarness({ now: NOW });
+      const res = await postJson(h, '/bookings', { ...valid, service_id: 'topics-4', topics });
+      expect(res.status).toBe(400);
+      expect((await body(res)).fields.topics).toBe('請重新選擇主題');
+    }
+  });
+
+  it('一般方案帶了主題也不理會', async () => {
+    const h = makeHarness({ now: NOW });
+    const b = await body(await postJson(h, '/bookings', { ...valid, topics: five, topic_note: '備註' }));
+    expect(b.amount).toBe(3600);
+    expect(h.db.booking(b.orderNo)!.questions).toBe('今年感情？');
+  });
+});
+
+describe('POST /bookings：接住你的諮詢室（問題必填）', () => {
+  it('沒寫煩惱 → 400 fields.questions；有寫 → 201、金額取 DB', async () => {
+    const h = makeHarness({ now: NOW });
+    for (const questions of [undefined, '   ']) {
+      const res = await postJson(h, '/bookings', { ...valid, service_id: 'listen', questions });
+      expect(res.status).toBe(400);
+      expect((await body(res)).fields.questions).toBe('請填寫這一欄');
+    }
+    expect(h.db.bookings).toHaveLength(0);
+    const res = await postJson(h, '/bookings', { ...valid, service_id: 'listen', questions: ' 最近和家人處不好 ' });
+    expect(res.status).toBe(201);
+    const b = await body(res);
+    expect(b.amount).toBe(5800);
+    const row = h.db.booking(b.orderNo)!;
+    expect(row.questions).toBe('最近和家人處不好');
+    expect(row.endsAt.getTime() - row.startsAt.getTime()).toBe(60 * 60_000);
+  });
+});

@@ -37,7 +37,9 @@ update public.services set active = false where id = 'quick';
 set role anon;
 do $$
 begin
-  assert (select count(*) from public.services) = 3, 'anon sees only active services';
+  -- seed 4 個 ＋ 0004 的 5 個（接住你的諮詢室、自選主題 4 個價位），quick 停用 → 8
+  assert (select count(*) from public.services) = 8, 'anon sees only active services';
+  assert not exists (select 1 from public.services where id = 'quick'), 'anon sees inactive service';
   assert (select count(*) from public.weekly_slots) = 30, 'anon sees weekly slots';
   begin
     perform 1 from public.bookings limit 1;

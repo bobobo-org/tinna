@@ -7,7 +7,8 @@ import { HERO_IMAGE, HERO_IMAGE_ALT, bookingHref } from '@/lib/site';
 
 export default async function HomePage() {
   const services = await getServices();
-  const homeServices = services.slice(0, 3);
+  // 首頁三格只放一般方案（自選主題的價位不單獨出現）
+  const homeServices = services.filter((s) => s.topicLimit === null).slice(0, 3);
 
   return (
     <>

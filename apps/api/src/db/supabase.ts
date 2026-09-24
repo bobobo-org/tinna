@@ -52,8 +52,22 @@ const PUBLIC_COLUMNS =
 const PAYMENT_COLUMNS =
   'id,booking_id,provider,method,provider_trade_no,provider_txn_id,amount,status,created_at,attention_reason,payment_url:raw->request->>paymentUrl';
 
+const SERVICE_COLUMNS = 'id,name,short_name,minutes,price,topic_limit,question_required';
+
 // 未產生 Supabase 型別檔；欄位在 map* 函式集中轉換
 type Row = any;
+
+function toService(r: Row): Service {
+  return {
+    id: r.id,
+    name: r.name,
+    shortName: r.short_name,
+    minutes: r.minutes,
+    price: r.price,
+    topicLimit: r.topic_limit ?? null,
+    questionRequired: r.question_required === true,
+  };
+}
 
 function mapPublic(r: Row): BookingPublic {
   return {
@@ -102,30 +116,23 @@ export class SupabaseDb implements Db {
   async listActiveServices(): Promise<Service[]> {
     const { data, error } = await this.sb
       .from('services')
-      .select('id,name,short_name,minutes,price')
+      .select(SERVICE_COLUMNS)
       .eq('active', true)
       .order('sort');
     if (error) fail('listActiveServices', error);
-    return (data ?? []).map((r: Row) => ({
-      id: r.id,
-      name: r.name,
-      shortName: r.short_name,
-      minutes: r.minutes,
-      price: r.price,
-    }));
+    return (data ?? []).map(toService);
   }
 
   async getActiveService(id: string): Promise<Service | null> {
     const { data, error } = await this.sb
       .from('services')
-      .select('id,name,short_name,minutes,price')
+      .select(SERVICE_COLUMNS)
       .eq('id', id)
       .eq('active', true)
       .maybeSingle();
     if (error) fail('getActiveService', error);
     if (!data) return null;
-    const r: Row = data;
-    return { id: r.id, name: r.name, shortName: r.short_name, minutes: r.minutes, price: r.price };
+    return toService(data);
   }
 
   async listWeeklySlots(): Promise<WeeklySlotRow[]> {
