@@ -1,0 +1,25 @@
+# docker build context = repo 根目錄（apps/api/Dockerfile 用）。
+# 只需要 package.json、pnpm-lock.yaml、pnpm-workspace.yaml 與 apps/api（含 CI 寫入的 apps/api/BUILD_SHA）。
+
+**/node_modules
+**/dist
+**/.next
+**/.next-*
+**/coverage
+**/*.log
+**/.DS_Store
+**/.env
+**/.env.*
+!**/.env.example
+
+.git
+.github
+.vscode
+.claude
+.shots
+.vercel
+
+apps/web
+design_handoff_yuanshe
+docs
+supabase
