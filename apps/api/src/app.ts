@@ -5,6 +5,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import type { AppDeps } from './deps';
 import { apiError } from './lib/http';
 import { errorFields } from './lib/log';
+import { adminRoutes } from './routes/admin';
 import { availabilityRoutes } from './routes/availability';
 import { bookingRoutes } from './routes/bookings';
 import { metaRoutes } from './routes/meta';
@@ -37,8 +38,9 @@ export function createApp(deps: AppDeps) {
     '*',
     cors({
       origin: (origin) => (deps.env.webOrigins.includes(origin) ? origin : null),
-      allowMethods: ['GET', 'POST', 'OPTIONS'],
-      allowHeaders: ['Content-Type'],
+      allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+      // Authorization：後台（/admin/*）帶 Supabase Auth 的 access token
+      allowHeaders: ['Content-Type', 'Authorization'],
       maxAge: 600,
     }),
   );
@@ -79,7 +81,26 @@ export function createApp(deps: AppDeps) {
     });
   }
 
+  // 後台的寫入請求：同樣只接受白名單 Origin；有 body 的（POST / PATCH）必須是 JSON（上傳圖片除外，另行檢查）
+  app.use('/admin/*', async (c, next) => {
+    const method = c.req.method;
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+    const origin = c.req.header('origin');
+    if (origin !== undefined && !deps.env.webOrigins.includes(origin)) {
+      deps.logger.warn('http.forbidden_origin', { path: c.req.path });
+      return apiError(c, 403, 'forbidden_origin', '不允許從這個網站送出');
+    }
+    if ((method === 'POST' || method === 'PATCH') && !c.req.path.startsWith('/admin/uploads')) {
+      const type = (c.req.header('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+      if (type !== 'application/json') {
+        return apiError(c, 415, 'unsupported_media_type', '請以 JSON 格式送出（Content-Type: application/json）');
+      }
+    }
+    return next();
+  });
+
   app.route('/', metaRoutes(deps));
+  app.route('/', adminRoutes(deps));
   app.route('/', availabilityRoutes(deps));
   app.route('/', bookingRoutes(deps));
   app.route('/', ecpayRoutes(deps));

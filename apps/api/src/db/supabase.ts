@@ -1,7 +1,9 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { AuthVerifier } from '../lib/admin-auth';
 import { normalizeTime } from '../lib/time';
 import {
   ACTIVE_STATUSES,
+  type AdminBooking,
   type AtmIssuedResult,
   type BookingFull,
   type BookingLimits,
@@ -69,6 +71,32 @@ function toService(r: Row): Service {
   };
 }
 
+const ADMIN_BOOKING_COLUMNS =
+  'order_no,status,pay_method,amount,starts_at,ends_at,confirmed_at,customer_name,gender,birth_date,birth_time,birth_place,phone,email,questions,needs_attention,attention_reason,service:services(id,name)';
+
+function mapAdminBooking(r: Row): AdminBooking {
+  return {
+    orderNo: r.order_no,
+    status: r.status,
+    payMethod: r.pay_method,
+    amount: r.amount,
+    startsAt: new Date(r.starts_at),
+    endsAt: new Date(r.ends_at),
+    confirmedAt: toDate(r.confirmed_at),
+    service: { id: r.service?.id ?? '', name: r.service?.name ?? '' },
+    customerName: r.customer_name,
+    gender: r.gender ?? null,
+    birthDate: r.birth_date,
+    birthTime: r.birth_time ? normalizeTime(r.birth_time) : null,
+    birthPlace: r.birth_place ?? null,
+    phone: r.phone,
+    email: r.email,
+    questions: r.questions ?? null,
+    needsAttention: !!r.needs_attention,
+    attentionReason: r.attention_reason ?? null,
+  };
+}
+
 function mapPublic(r: Row): BookingPublic {
   return {
     id: r.id,
@@ -108,6 +136,24 @@ export function createSupabaseDb(url: string, serviceRoleKey: string): Db {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
   return new SupabaseDb(sb);
+}
+
+/**
+ * 後台登入驗證：用獨立的 client 呼叫 Supabase Auth 的 getUser（只驗證 token，不登入、不保存 session，
+ * 不會影響資料存取用的 service_role client）
+ */
+export function createSupabaseAuth(url: string, serviceRoleKey: string): AuthVerifier {
+  const sb: SupabaseClient = createClient(url, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+  return {
+    async verify(accessToken: string) {
+      const { data, error } = await sb.auth.getUser(accessToken);
+      const user = data?.user;
+      if (error || !user?.email || !user.email_confirmed_at) return null;
+      return { email: user.email };
+    },
+  };
 }
 
 export class SupabaseDb implements Db {
@@ -301,6 +347,26 @@ export class SupabaseDb implements Db {
       .limit(20);
     if (error) fail('listUnsentTransferInfos', error);
     return (data ?? []).map((r: Row) => r.id);
+  }
+
+  async isAdmin(emailSha256: string): Promise<boolean> {
+    const { data, error } = await this.sb.from('admins').select('email_sha256').eq('email_sha256', emailSha256).maybeSingle();
+    if (error) fail('isAdmin', error);
+    return !!data;
+  }
+
+  async listBookingsAdmin(q: { from: Date; to: Date; statuses: BookingStatus[] | null; limit: number }): Promise<AdminBooking[]> {
+    let query = this.sb
+      .from('bookings')
+      .select(ADMIN_BOOKING_COLUMNS)
+      .gte('starts_at', q.from.toISOString())
+      .lt('starts_at', q.to.toISOString())
+      .order('starts_at', { ascending: true })
+      .limit(q.limit);
+    if (q.statuses) query = query.in('status', q.statuses);
+    const { data, error } = await query;
+    if (error) fail('listBookingsAdmin', error);
+    return (data ?? []).map(mapAdminBooking);
   }
 
   async insertPayment(p: NewPayment): Promise<PaymentRow> {

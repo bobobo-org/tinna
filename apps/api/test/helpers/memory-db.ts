@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   ACTIVE_STATUSES,
+  type AdminBooking,
   type AtmIssuedResult,
   type BookingFull,
   type BookingLimits,
@@ -205,6 +206,44 @@ export class MemoryDb implements Db {
       needsAttention: b.needsAttention,
       service: { id: s.id, name: s.name, minutes: s.minutes },
     };
+  }
+
+  // ---------- 後台 ----------
+  /** admins.email_sha256 */
+  admins = new Set<string>();
+
+  async isAdmin(emailSha256: string) {
+    return this.admins.has(emailSha256);
+  }
+
+  async listBookingsAdmin(q: { from: Date; to: Date; statuses: BookingStatus[] | null; limit: number }): Promise<AdminBooking[]> {
+    return this.bookings
+      .filter((b) => b.startsAt >= q.from && b.startsAt < q.to && (!q.statuses || q.statuses.includes(b.status)))
+      .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+      .slice(0, q.limit)
+      .map((b) => {
+        const s = this.services.find((x) => x.id === b.serviceId)!;
+        return {
+          orderNo: b.orderNo,
+          status: b.status,
+          payMethod: b.payMethod,
+          amount: b.amount,
+          startsAt: b.startsAt,
+          endsAt: b.endsAt,
+          confirmedAt: b.confirmedAt,
+          service: { id: s.id, name: s.name },
+          customerName: b.customerName,
+          gender: b.gender,
+          birthDate: b.birthDate,
+          birthTime: b.birthTime,
+          birthPlace: b.birthPlace,
+          phone: b.phone,
+          email: b.email,
+          questions: b.questions,
+          needsAttention: b.needsAttention,
+          attentionReason: b.attentionReason,
+        };
+      });
   }
 
   // ---------- Db ----------

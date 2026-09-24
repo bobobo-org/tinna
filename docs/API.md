@@ -167,3 +167,19 @@ apps/api（Railway）與 apps/web（Vercel）之間唯一的介面約定。兩�
 - `pending_payment` / `awaiting_transfer` 且 `hold_expires_at < now()` → `expired`，時段自動釋出
 - 補寄沒寄成功的確認信、轉帳資訊信、給老師的新訂單通知
 - LINE Pay 對帳：24 小時內仍未結束的 LINE Pay 付款查詢交易狀態後收尾（已完成 → 確認；已授權 → 補 Confirm；取消／失敗 → 標失敗）
+
+## 後台（`/admin/*`）
+
+- 登入：web 端用 Supabase Auth（Email＋密碼，第一次需收信確認）取得 access token，每個請求帶 `Authorization: Bearer <token>`
+- API 以 Supabase Auth 驗證 token（Email 必須已確認），再以 `sha256(lower(trim(email)))` 比對 `admins` 表（repo 公開，初始管理者只存雜湊）
+  - 沒帶／無效／過期 → `401 { "error": "unauthorized" }`；不在名單 → `403 { "error": "forbidden" }`
+- 寫入請求（POST／PATCH／DELETE）：Origin 必須在 `WEB_URL` 白名單（否則 `403 forbidden_origin`）；POST／PATCH 必須是 JSON（否則 `415`，上傳圖片除外）
+- 回應含顧客個資，不寫進 log
+
+### `GET /admin/me`
+`200 { "email": "…" }`
+
+### `GET /admin/bookings?from=YYYY-MM-DD&to=YYYY-MM-DD&status=<逗號分隔>`
+- 預設 `from` = 今天、`to` = `from` + 30 天（台北時間，含 `to` 當天）；區間最多一年；`status` 可選 `pending_payment,awaiting_transfer,confirmed,cancelled,expired,refunded`
+- `200 { "from", "to", "bookings": [{ "orderNo", "status", "payMethod", "amount", "date", "time", "startsAt", "endsAt", "confirmedAt", "service": { "id", "name" }, "customer": { "name", "gender", "birthDate", "birthTime", "birthPlace", "phone", "email" }, "questions", "needsAttention", "attentionReason" }] }`（依開始時間排序，最多 500 筆）
+- 參數不正確 → `400 validation`

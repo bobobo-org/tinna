@@ -1,6 +1,7 @@
 import { createApp } from '../../src/app';
 import type { AppDeps } from '../../src/deps';
 import { loadEnv, type Env } from '../../src/env';
+import { emailSha256, type AuthVerifier } from '../../src/lib/admin-auth';
 import { computeCheckMacValue } from '../../src/lib/ecpay';
 import { LinePayClient } from '../../src/lib/linepay';
 import type { LogFields, Logger } from '../../src/lib/log';
@@ -44,6 +45,22 @@ export class FakeMailer implements Mailer {
   }
 }
 
+/** 後台登入：token → Email（已確認）；沒登記的 token 視為無效 */
+export class FakeAuth implements AuthVerifier {
+  tokens = new Map<string, string>();
+  async verify(accessToken: string) {
+    const email = this.tokens.get(accessToken);
+    return email ? { email } : null;
+  }
+}
+
+/** 登記一個管理者並回傳帶 token 的 headers */
+export function adminHeaders(h: Harness, email = 'owner@example.com', token = 'admin-token'): Record<string, string> {
+  h.auth.tokens.set(token, email);
+  h.db.admins.add(emailSha256(email));
+  return { Authorization: `Bearer ${token}` };
+}
+
 export class MemoryLogger implements Logger {
   lines: { level: string; msg: string; fields?: LogFields }[] = [];
   debug(msg: string, fields?: LogFields) {
@@ -66,6 +83,7 @@ export class MemoryLogger implements Logger {
 export interface Harness {
   app: ReturnType<typeof createApp>;
   db: MemoryDb;
+  auth: FakeAuth;
   mailer: FakeMailer;
   logger: MemoryLogger;
   env: Env;
@@ -101,12 +119,14 @@ export function makeHarness(
   if (!loaded.ok) throw new Error(loaded.errors.join('\n'));
   const env = loaded.env;
   const db = new MemoryDb(() => clock.now);
+  const auth = new FakeAuth();
   const mailer = new FakeMailer();
   const logger = new MemoryLogger();
   const pending: Promise<void>[] = [];
   const deps: AppDeps = {
     env,
     db,
+    auth,
     mailer,
     linepay: env.linepay ? new LinePayClient(env.linepay, (opts.linepayFetch ?? fetch) as typeof fetch) : null,
     logger,
@@ -121,7 +141,7 @@ export function makeHarness(
   const flush = async () => {
     while (pending.length) await pending.shift();
   };
-  return { app, db, mailer, logger, env, deps, clock, flush, linepayFetch: opts.linepayFetch };
+  return { app, db, auth, mailer, logger, env, deps, clock, flush, linepayFetch: opts.linepayFetch };
 }
 
 /** 以測試金鑰簽一個綠界回呼 */

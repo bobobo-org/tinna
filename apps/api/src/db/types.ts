@@ -79,6 +79,28 @@ export interface BookingPublic {
   service: { id: string; name: string; minutes: number };
 }
 
+/** 後台預約列表（含個資，只給管理者，不可 log） */
+export interface AdminBooking {
+  orderNo: string;
+  status: BookingStatus;
+  payMethod: PayMethod;
+  amount: number;
+  startsAt: Date;
+  endsAt: Date;
+  confirmedAt: Date | null;
+  service: { id: string; name: string };
+  customerName: string;
+  gender: string | null;
+  birthDate: string;
+  birthTime: string | null;
+  birthPlace: string | null;
+  phone: string;
+  email: string;
+  questions: string | null;
+  needsAttention: boolean;
+  attentionReason: string | null;
+}
+
 /** 寄信用（含個資，只在寄信時讀取，不可 log） */
 export interface BookingFull extends BookingPublic {
   customerName: string;
@@ -193,6 +215,11 @@ export interface Db {
   listUnsentAdminNotifications(confirmedAfter: Date, confirmedBefore: Date): Promise<string[]>;
   /** 待轉帳（保留未逾時）但轉帳資訊信沒寄出 */
   listUnsentTransferInfos(now: Date): Promise<string[]>;
+
+  /** 後台：管理者名單（admins.email_sha256 = sha256(lower(trim(email)))） */
+  isAdmin(emailSha256: string): Promise<boolean>;
+  /** 後台：starts_at ∈ [from, to) 的預約（statuses 為 null 表示全部狀態），依開始時間排序 */
+  listBookingsAdmin(q: { from: Date; to: Date; statuses: BookingStatus[] | null; limit: number }): Promise<AdminBooking[]>;
 
   insertPayment(p: NewPayment): Promise<PaymentRow>;
   getPayment(provider: Provider, tradeNo: string): Promise<PaymentRow | null>;
