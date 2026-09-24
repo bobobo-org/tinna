@@ -1,5 +1,7 @@
 // 資料存取介面：正式環境用 Supabase（service_role），測試用記憶體實作（行為對齊 SQL 函式）。
 
+import type { OrderKind, ReferralCode } from '../lib/referral';
+
 export type BookingStatus =
   | 'pending_payment'
   | 'awaiting_transfer'
@@ -99,6 +101,61 @@ export interface AdminBooking {
   questions: string | null;
   needsAttention: boolean;
   attentionReason: string | null;
+}
+
+// ---------- KOL 推薦碼（0006） ----------
+
+export interface Kol {
+  id: string;
+  name: string;
+  contact: string | null;
+  note: string | null;
+  active: boolean;
+  createdAt: Date;
+}
+
+export interface NewKol {
+  name: string;
+  contact: string | null;
+  note: string | null;
+}
+
+export type KolPatch = Partial<Pick<Kol, 'name' | 'contact' | 'note' | 'active'>>;
+
+export interface NewReferralCode {
+  code: string;
+  kolId: string;
+  discountType: 'percent' | 'amount';
+  discountValue: number;
+  commissionRate: number;
+  appliesBooking: boolean;
+  appliesVip: boolean;
+  appliesShop: boolean;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  maxUses: number | null;
+}
+
+export type ReferralCodePatch = Partial<Omit<NewReferralCode, 'code' | 'kolId'> & { active: boolean }>;
+
+export interface NewReferralUse {
+  codeId: string;
+  kind: OrderKind;
+  orderNo: string;
+  bookingId: string | null;
+  originalAmount: number;
+  discountAmount: number;
+  finalAmount: number;
+  commissionAmount: number;
+}
+
+/** 使用紀錄＋訂單目前狀態（paid：已付款才算成效與佣金；cancelled：取消／逾時／退款） */
+export interface ReferralUseRow extends NewReferralUse {
+  id: string;
+  code: string;
+  kolId: string;
+  createdAt: Date;
+  orderState: 'paid' | 'pending' | 'cancelled';
 }
 
 /** 寄信用（含個資，只在寄信時讀取，不可 log） */
@@ -220,6 +277,21 @@ export interface Db {
   isAdmin(emailSha256: string): Promise<boolean>;
   /** 後台：starts_at ∈ [from, to) 的預約（statuses 為 null 表示全部狀態），依開始時間排序 */
   listBookingsAdmin(q: { from: Date; to: Date; statuses: BookingStatus[] | null; limit: number }): Promise<AdminBooking[]>;
+
+  // ---------- KOL 推薦碼 ----------
+  findReferralCode(code: string): Promise<ReferralCode | null>;
+  /** 還有效的使用次數（訂單已付款，或仍在保留中）；給「可用次數」判斷用 */
+  countLiveReferralUses(codeId: string, now: Date): Promise<number>;
+  recordReferralUse(u: NewReferralUse): Promise<void>;
+  listKols(): Promise<Kol[]>;
+  createKol(k: NewKol): Promise<Kol>;
+  updateKol(id: string, patch: KolPatch): Promise<Kol | null>;
+  listReferralCodes(): Promise<ReferralCode[]>;
+  /** 代碼重複 → 'duplicate'；KOL 不存在 → 'no_kol' */
+  createReferralCode(c: NewReferralCode): Promise<ReferralCode | 'duplicate' | 'no_kol'>;
+  updateReferralCode(id: string, patch: ReferralCodePatch): Promise<ReferralCode | null>;
+  /** created_at ∈ [from, to) 的使用紀錄（新到舊） */
+  listReferralUses(q: { from: Date; to: Date; now: Date }): Promise<ReferralUseRow[]>;
 
   insertPayment(p: NewPayment): Promise<PaymentRow>;
   getPayment(provider: Provider, tradeNo: string): Promise<PaymentRow | null>;

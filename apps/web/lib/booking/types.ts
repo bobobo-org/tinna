@@ -41,6 +41,7 @@ export type FieldKey =
   | 'email'
   | 'q'
   | 'pay'
+  | 'ref'
   | 'agree';
 
 export type FieldErrors = Partial<Record<FieldKey, string>>;
@@ -72,6 +73,8 @@ export interface BookingDraft {
   topics: string[];
   /** 自選主題的備註 */
   topicNote: string;
+  /** 已套用的 KOL 推薦碼（空字串＝沒有） */
+  referral: string;
 }
 
 // ---------- API 回應（docs/API.md） ----------
@@ -116,6 +119,8 @@ export interface CreateBookingBody {
   /** 自選主題（依優先順序）；其他方案送空陣列 */
   topics: string[];
   topic_note: string;
+  /** KOL 推薦碼（空字串＝沒有）；折扣由 API 依 DB 設定計算 */
+  referral_code: string;
   pay_method: PayMethod;
   agree: boolean;
 }

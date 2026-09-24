@@ -5,9 +5,11 @@ import { secureHeaders } from 'hono/secure-headers';
 import type { AppDeps } from './deps';
 import { apiError } from './lib/http';
 import { errorFields } from './lib/log';
-import { adminRoutes } from './routes/admin';
+import { adminAuth, adminRoutes } from './routes/admin';
+import { adminReferralRoutes } from './routes/admin-referrals';
 import { availabilityRoutes } from './routes/availability';
 import { bookingRoutes } from './routes/bookings';
+import { referralRoutes } from './routes/referrals';
 import { metaRoutes } from './routes/meta';
 import { ecpayRoutes } from './routes/payments/ecpay';
 import { linepayRoutes } from './routes/payments/linepay';
@@ -99,8 +101,12 @@ export function createApp(deps: AppDeps) {
     return next();
   });
 
+  app.use('/admin/*', adminAuth(deps));
+
   app.route('/', metaRoutes(deps));
   app.route('/', adminRoutes(deps));
+  app.route('/', adminReferralRoutes(deps));
+  app.route('/', referralRoutes(deps));
   app.route('/', availabilityRoutes(deps));
   app.route('/', bookingRoutes(deps));
   app.route('/', ecpayRoutes(deps));

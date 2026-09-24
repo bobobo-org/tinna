@@ -31,6 +31,7 @@ describe('toBookingBody', () => {
       questions: '今年適合換工作嗎？',
       topics: [],
       topic_note: '',
+      referral_code: '',
       pay_method: 'atm',
       agree: true,
     });
@@ -64,6 +65,7 @@ describe('mapApiFieldErrors（400 validation → 欄位與步驟）', () => {
     expect(mapApiFieldErrors({ service_id: '請選擇方案', name: 'x' }).step).toBe(1);
     expect(mapApiFieldErrors({ topics: '請至少選擇 4 個主題' })).toEqual({ errors: { svc: '請至少選擇 4 個主題' }, step: 1, unknown: [] });
     expect(mapApiFieldErrors({ questions: '請填寫這一欄' })).toEqual({ errors: { q: '請填寫這一欄' }, step: 3, unknown: [] });
+    expect(mapApiFieldErrors({ referral_code: '找不到這個推薦碼' })).toEqual({ errors: { ref: '找不到這個推薦碼' }, step: 4, unknown: [] });
     expect(mapApiFieldErrors({ pay_method: 'LINE Pay 即將開放' })).toEqual({ errors: { pay: 'LINE Pay 即將開放' }, step: 4, unknown: [] });
   });
   it('認不得的欄位留在 Step 4 當整體訊息', () => {
@@ -108,6 +110,12 @@ describe('沿用訂單（從綠界返回後重新付款）', () => {
     expect(canReuseOrder(withTopics, { ...s, topics: ['工作', '財運', '健康', '小孩'] }, now)).toBe(false);
     expect(canReuseOrder(withTopics, { ...s, topicNote: '別的' }, now)).toBe(false);
     expect(canReuseOrder(withTopics, { ...s, topics: [], topicNote: '' }, now)).toBe(false);
+  });
+  it('推薦碼改了（或拿掉）→ 金額不同，不沿用', () => {
+    const withRef = { ...order, fp: formFingerprint(f, [], '', 'AMY10') };
+    expect(canReuseOrder(withRef, { ...same, referral: 'AMY10' }, now)).toBe(true);
+    expect(canReuseOrder(withRef, { ...same, referral: '' }, now)).toBe(false);
+    expect(canReuseOrder(withRef, { ...same, referral: 'BOB20' }, now)).toBe(false);
   });
   it('holdExpired / isOwnHold', () => {
     expect(holdExpired({ holdExpiresAt: null }, now)).toBe(false);
@@ -163,6 +171,12 @@ describe('sessionStorage 草稿', () => {
     expect(d.topics).toEqual(['財運', '工作', '其他']);
     expect(d.topicNote).toHaveLength(500);
     expect(sanitizeDraft({ topics: '財運' }).topics).toEqual([]);
+  });
+
+  it('推薦碼：只留格式正確的', () => {
+    expect(sanitizeDraft({ referral: 'AMY10' }).referral).toBe('AMY10');
+    expect(sanitizeDraft({ referral: '<script>' }).referral).toBe('');
+    expect(sanitizeDraft({ referral: 5 }).referral).toBe('');
   });
 
   it('storage 丟例外不會讓頁面壞掉', () => {

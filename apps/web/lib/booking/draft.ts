@@ -5,6 +5,7 @@
  * - sessionStorage 在無痕模式／被停用時可能丟例外：一律吞掉，只是不存
  */
 
+import { CODE_RE } from '../referral';
 import { TOPIC_NOTE_MAX, isTopic } from '../topics';
 import type { BookingDraft, BookingForm, Gender, PayMethod, PendingOrder } from './types';
 
@@ -31,6 +32,7 @@ export const EMPTY_DRAFT: BookingDraft = {
   order: null,
   topics: [],
   topicNote: '',
+  referral: '',
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -95,6 +97,7 @@ export function sanitizeDraft(raw: unknown): BookingDraft {
     order: sanitizeOrder(r.order),
     topics: sanitizeTopics(r.topics),
     topicNote: str(r.topicNote, TOPIC_NOTE_MAX),
+    referral: typeof r.referral === 'string' && CODE_RE.test(r.referral) ? r.referral : '',
   };
 }
 

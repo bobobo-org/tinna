@@ -89,7 +89,7 @@ export function canGoNext(step: Step, s: ValidationInput, today: string): boolea
 }
 
 /** 顯示錯誤時的欄位順序（捲到第一個錯誤欄位） */
-export const FIELD_ORDER = ['name', 'gender', 'bdate', 'btime', 'bplace', 'phone', 'email', 'q', 'pay', 'agree'] as const;
+export const FIELD_ORDER = ['name', 'gender', 'bdate', 'btime', 'bplace', 'phone', 'email', 'q', 'pay', 'ref', 'agree'] as const;
 
 export function firstErrorField(e: FieldErrors): (typeof FIELD_ORDER)[number] | null {
   return FIELD_ORDER.find((k) => e[k]) ?? null;

@@ -23,6 +23,7 @@ export const MSG = {
   topicsMin: (n: number) => `請至少選擇 ${n} 個主題`,
   topicsTier: '主題數量與方案不符，請重新整理頁面後再選一次',
   questionRequired: '請填寫這一欄',
+  referral: '推薦碼格式不正確',
   tooLong: (n: number) => `請勿超過 ${n} 字`,
 } as const;
 
@@ -70,6 +71,13 @@ export const bookingBodySchema = z.object({
   topic_note: z
     .string({ invalid_type_error: MSG.tooLong(500) })
     .max(500, MSG.tooLong(500))
+    .optional()
+    .default(''),
+  // KOL 推薦碼（選填）；能不能用、折多少在 route 內依 DB 設定判斷
+  referral_code: z
+    .string({ invalid_type_error: MSG.referral })
+    .trim()
+    .max(20, MSG.referral)
     .optional()
     .default(''),
   pay_method: z.enum(['card', 'line', 'atm'], { errorMap: () => ({ message: MSG.payMethod }) }),

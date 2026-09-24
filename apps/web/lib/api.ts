@@ -15,6 +15,7 @@ import type {
   PaymentConfig,
   PublicBooking,
 } from './booking/types';
+import type { ReferralPreview } from './referral';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -133,6 +134,8 @@ export function createApiClient(baseUrl: string | undefined, fetchImpl: typeof f
     },
     createBooking: (body: CreateBookingBody) =>
       request<CreateBookingResponse>('/bookings', { method: 'POST', body, timeoutMs: 25_000 }),
+    getReferral: (code: string, kind: 'booking' | 'vip' | 'shop', signal?: AbortSignal) =>
+      request<ReferralPreview>(`/referral/${encodeURIComponent(code)}?kind=${kind}`, { signal, timeoutMs: 10_000 }),
     getBooking: (orderNo: string, signal?: AbortSignal) =>
       request<PublicBooking>(`/bookings/${encodeURIComponent(orderNo)}`, { signal }),
     ecpayCheckout: (orderNo: string) =>

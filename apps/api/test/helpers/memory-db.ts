@@ -14,8 +14,15 @@ import {
   type EmailKind,
   type FailedResult,
   type FlagResult,
+  type Kol,
+  type KolPatch,
   type NewBooking,
+  type NewKol,
   type NewPayment,
+  type NewReferralCode,
+  type NewReferralUse,
+  type ReferralCodePatch,
+  type ReferralUseRow,
   type PaidResult,
   type PaymentRow,
   type PaymentStatus,
@@ -25,6 +32,7 @@ import {
   type WeeklySlotRow,
 } from '../../src/db/types';
 import { generateOrderNo } from '../../src/lib/order-no';
+import type { ReferralCode } from '../../src/lib/referral';
 
 // 測試用記憶體資料庫。狀態轉換邏輯逐行對齊 supabase/migrations 的 SQL 函式
 // （0002 取代後的 apply_payment_paid / apply_atm_issued，以及 create_booking / flag_payment_attention /
@@ -243,6 +251,86 @@ export class MemoryDb implements Db {
           needsAttention: b.needsAttention,
           attentionReason: b.attentionReason,
         };
+      });
+  }
+
+  // ---------- KOL 推薦碼 ----------
+  kols: Kol[] = [];
+  referralCodes: Omit<ReferralCode, 'kolName' | 'kolActive'>[] = [];
+  referralUses: (NewReferralUse & { id: string; createdAt: Date })[] = [];
+
+  private withKol(c: Omit<ReferralCode, 'kolName' | 'kolActive'>): ReferralCode {
+    const k = this.kols.find((x) => x.id === c.kolId);
+    return { ...c, kolName: k?.name ?? '', kolActive: k?.active !== false };
+  }
+
+  /** 對齊 supabase.ts referralOrderState：已付款／保留中／已取消 */
+  private referralState(u: NewReferralUse, now: Date): 'paid' | 'pending' | 'cancelled' {
+    const b = u.bookingId ? this.bookings.find((x) => x.id === u.bookingId) : undefined;
+    if (u.kind !== 'booking' || !b) return 'cancelled';
+    if (b.status === 'confirmed') return 'paid';
+    if (b.status === 'awaiting_transfer') return 'pending';
+    if (b.status === 'pending_payment' && b.holdExpiresAt && b.holdExpiresAt > now) return 'pending';
+    return 'cancelled';
+  }
+
+  async findReferralCode(code: string) {
+    const c = this.referralCodes.find((x) => x.code === code);
+    return c ? this.withKol(c) : null;
+  }
+
+  async countLiveReferralUses(codeId: string, now: Date) {
+    return this.referralUses.filter((u) => u.codeId === codeId && this.referralState(u, now) !== 'cancelled').length;
+  }
+
+  async recordReferralUse(u: NewReferralUse) {
+    if (this.referralUses.some((x) => x.kind === u.kind && x.orderNo === u.orderNo)) throw new Error('duplicate referral use');
+    this.referralUses.push({ ...u, id: randomUUID(), createdAt: this.clock() });
+  }
+
+  async listKols() {
+    return this.kols.map((k) => ({ ...k }));
+  }
+
+  async createKol(k: NewKol) {
+    const row: Kol = { id: randomUUID(), ...k, active: true, createdAt: this.clock() };
+    this.kols.push(row);
+    return { ...row };
+  }
+
+  async updateKol(id: string, patch: KolPatch) {
+    const k = this.kols.find((x) => x.id === id);
+    if (!k) return null;
+    Object.assign(k, patch);
+    return { ...k };
+  }
+
+  async listReferralCodes() {
+    return this.referralCodes.map((c) => this.withKol(c));
+  }
+
+  async createReferralCode(c: NewReferralCode) {
+    if (this.referralCodes.some((x) => x.code === c.code)) return 'duplicate' as const;
+    if (!this.kols.some((k) => k.id === c.kolId)) return 'no_kol' as const;
+    const row = { ...c, id: randomUUID(), active: true, createdAt: this.clock() };
+    this.referralCodes.push(row);
+    return this.withKol(row);
+  }
+
+  async updateReferralCode(id: string, patch: ReferralCodePatch) {
+    const c = this.referralCodes.find((x) => x.id === id);
+    if (!c) return null;
+    Object.assign(c, patch);
+    return this.withKol(c);
+  }
+
+  async listReferralUses(q: { from: Date; to: Date; now: Date }): Promise<ReferralUseRow[]> {
+    return this.referralUses
+      .filter((u) => u.createdAt >= q.from && u.createdAt < q.to)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map((u) => {
+        const c = this.referralCodes.find((x) => x.id === u.codeId);
+        return { ...u, code: c?.code ?? '', kolId: c?.kolId ?? '', orderState: this.referralState(u, q.now) };
       });
   }
 

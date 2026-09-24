@@ -26,6 +26,7 @@ import type {
   Step,
 } from '@/lib/booking/types';
 import { canGoNext, clampStep, firstErrorField, validateStep, type ValidationInput } from '@/lib/booking/validate';
+import { applyDiscount, loadReferral, normalizeCode, type ReferralPreview } from '@/lib/referral';
 import { findService, formatPrice, isTopicTier, tierFor, topicRange, topicTiers, type Service } from '@/lib/services';
 import { MobileBar, SummaryCard, type SummaryValues } from './BookingSummary';
 import StepDetails from './StepDetails';
@@ -49,6 +50,7 @@ const FIELD_ELEMENT: Record<string, string> = {
   phone: 'bk-phone',
   email: 'bk-email',
   q: 'bk-q',
+  ref: 'bk-ref',
   agree: 'bk-agree',
   payError: 'bk-pay-error',
 };
@@ -97,6 +99,13 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   const [topics, setTopics] = useState<string[]>([]);
   const [topicNote, setTopicNote] = useState('');
   const [svcNotice, setSvcNotice] = useState<string | null>(null);
+  // KOL 推薦碼：輸入框、已套用的推薦碼（預覽）、確認中
+  const [refInput, setRefInput] = useState('');
+  const [referral, setReferral] = useState<ReferralPreview | null>(null);
+  const [refBusy, setRefBusy] = useState(false);
+  const pendingRef = useRef<string | null>(null);
+  /** 使用者自己拿掉推薦碼後，不再自動帶入 */
+  const refDismissed = useRef(false);
   const [err, setErr] = useState<FieldErrors>({});
   const [paying, setPaying] = useState(false);
   const [sumOpen, setSumOpen] = useState(false);
@@ -132,8 +141,8 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     qRequired,
   };
   // 讓 effect／非同步流程讀到最新值（不必把每個 state 都列進 deps）
-  const latest = useRef({ svc, step, date, time, f, pay, agree, order, topics, topicNote, vin, today });
-  latest.current = { svc, step, date, time, f, pay, agree, order, topics, topicNote, vin, today };
+  const latest = useRef({ svc, step, date, time, f, pay, agree, order, topics, topicNote, referral, vin, today });
+  latest.current = { svc, step, date, time, f, pay, agree, order, topics, topicNote, referral, vin, today };
 
   const requestFocus = useCallback((id: string) => setFocusReq((p) => ({ id, n: (p?.n ?? 0) + 1 })), []);
 
@@ -244,6 +253,10 @@ export default function BookingFlow({ services, serverNow }: { services: Service
       nextTopics = d.topics;
       setTopics(d.topics);
       setTopicNote(d.topicNote);
+      if (d.referral) {
+        setRefInput(d.referral);
+        pendingRef.current = d.referral;
+      }
     }
     // 自選主題：價位跟著還原的題數走（網址帶的價位可能和題數不符）
     if (isTopicTier(findService(services, nextSvc))) nextSvc = tierFor(tiers, nextTopics.length)?.id ?? nextSvc;
@@ -297,8 +310,8 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   // 存草稿（關分頁即清）
   useEffect(() => {
     if (!restored) return;
-    saveDraft({ svc, date, time, f, pay, agree, order, topics, topicNote });
-  }, [restored, svc, date, time, f, pay, agree, order, topics, topicNote]);
+    saveDraft({ svc, date, time, f, pay, agree, order, topics, topicNote, referral: referral?.code ?? '' });
+  }, [restored, svc, date, time, f, pay, agree, order, topics, topicNote, referral]);
 
   // 從綠界按返回（bfcache 還原）：解除「付款處理中…」
   useEffect(() => {
@@ -385,6 +398,19 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     return () => ctrl.abort();
   }, [step, config]);
 
+  // Step 4：草稿裡已套用的推薦碼，或 KOL 分享連結帶進來的推薦碼 → 自動套用（重新向 API 確認還能不能用）
+  useEffect(() => {
+    if (step !== 4 || referral || refDismissed.current) return;
+    const code = pendingRef.current ?? loadReferral();
+    pendingRef.current = null;
+    if (code) {
+      setRefInput(code);
+      void applyReferral(code, true);
+    }
+    // 只在進入 Step 4 時檢查一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
+
   // 目前的付款方式不能用（未開通／改成近期時段後 ATM 不適用）→ 自動改回可用的方式並提示
   const { card: canCard, line: canLine, atm: canAtm } = payAv.enabled;
   useEffect(() => {
@@ -419,6 +445,41 @@ export default function BookingFlow({ services, serverNow }: { services: Service
   /** 送出的主題：只有自選主題才帶 */
   const topicPayload = (c: { svc: string | null; topics: string[]; topicNote: string }) =>
     isTopicTier(findService(services, c.svc)) ? { topics: c.topics, topicNote: c.topicNote } : { topics: [], topicNote: '' };
+
+  /** 套用推薦碼（silent：自動帶入的，失敗不顯示錯誤） */
+  const applyReferral = useCallback(async (raw: string, silent = false) => {
+    const code = normalizeCode(raw);
+    if (!code) {
+      if (!silent) setErr((prev) => ({ ...prev, ref: '推薦碼請輸入 3–20 個英文或數字' }));
+      return;
+    }
+    setRefBusy(true);
+    try {
+      const r = await api.getReferral(code, 'booking');
+      setReferral(r);
+      setRefInput(r.code);
+      setErr((prev) => {
+        const next = { ...prev };
+        delete next.ref;
+        return next;
+      });
+    } catch (e) {
+      if (!silent) setErr((prev) => ({ ...prev, ref: e instanceof ApiError ? e.message : MSG_NETWORK }));
+    } finally {
+      setRefBusy(false);
+    }
+  }, []);
+
+  const removeReferral = () => {
+    refDismissed.current = true;
+    setReferral(null);
+    setRefInput('');
+    setErr((prev) => {
+      const next = { ...prev };
+      delete next.ref;
+      return next;
+    });
+  };
 
   const pickDate = (d: string) => {
     setDate(d);
@@ -471,7 +532,10 @@ export default function BookingFlow({ services, serverNow }: { services: Service
       return;
     }
     setErr(m.errors);
-    const extra = m.unknown.length > 0 ? m.unknown.join('、') : !m.errors.agree && !m.errors.pay ? e.message : null;
+    // 推薦碼在送出時才被拒（例：剛好過期或額滿）→ 拿掉已套用的，讓使用者看到輸入框與錯誤
+    if (m.errors.ref) setReferral(null);
+    const extra =
+      m.unknown.length > 0 ? m.unknown.join('、') : !m.errors.agree && !m.errors.pay && !m.errors.ref ? e.message : null;
     if (extra) setPayError(extra);
     requestFocus(firstErrorField(m.errors) ?? 'payError');
   };
@@ -515,7 +579,16 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     try {
       const tp = topicPayload(cur);
       const res = await api.createBooking(
-        toBookingBody({ svc: cur.svc, date: cur.date, time: cur.time, f: cur.f, pay: cur.pay, agree: cur.agree, ...tp }),
+        toBookingBody({
+          svc: cur.svc,
+          date: cur.date,
+          time: cur.time,
+          f: cur.f,
+          pay: cur.pay,
+          agree: cur.agree,
+          ...tp,
+          referral: cur.referral?.code ?? '',
+        }),
       );
       const o: PendingOrder = {
         orderNo: res.orderNo,
@@ -525,7 +598,7 @@ export default function BookingFlow({ services, serverNow }: { services: Service
         pay: res.payMethod ?? cur.pay,
         amount: res.amount,
         holdExpiresAt: res.holdExpiresAt ?? null,
-        fp: formFingerprint(cur.f, tp.topics, tp.topicNote),
+        fp: formFingerprint(cur.f, tp.topics, tp.topicNote, cur.referral?.code ?? ''),
       };
       setOrder(o);
       // 馬上寫進 sessionStorage：下一刻就要離開頁面，等不到 effect
@@ -539,6 +612,7 @@ export default function BookingFlow({ services, serverNow }: { services: Service
         order: o,
         topics: cur.topics,
         topicNote: cur.topicNote,
+        referral: cur.referral?.code ?? '',
       });
       return redirectToPayment(o, retried);
     } catch (e) {
@@ -582,7 +656,7 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     setPayError(null);
     const reuse = canReuseOrder(
       cur.order,
-      { svc: cur.svc, date: cur.date, time: cur.time, pay: cur.pay, f: cur.f, ...topicPayload(cur) },
+      { svc: cur.svc, date: cur.date, time: cur.time, pay: cur.pay, f: cur.f, ...topicPayload(cur), referral: cur.referral?.code ?? '' },
       now(),
     )
       ? cur.order
@@ -617,7 +691,9 @@ export default function BookingFlow({ services, serverNow }: { services: Service
 
   // ---------- 畫面 ----------
   const nextEnabled = canGoNext(step, vin, today) && !paying;
-  const price = service ? formatPrice(service.price) : 'NT$0';
+  // 推薦碼折扣（和 API 相同算法；實際收費以建立訂單時 API 算的為準）
+  const discount = service && referral ? applyDiscount(service.price, referral).discount : 0;
+  const price = service ? formatPrice(service.price - discount) : 'NT$0';
   const nextLabel = paying ? '付款處理中…' : step === 4 ? (pay === 'atm' ? '取得轉帳帳號' : `確認付款 ${service ? price : ''}`) : '下一步';
   const nextLabelM = paying ? '處理中…' : step === 4 ? (pay === 'atm' ? '取得帳號' : '確認付款') : '下一步';
   const sum: SummaryValues = {
@@ -691,6 +767,21 @@ export default function BookingFlow({ services, serverNow }: { services: Service
                   notice={payNotice}
                   payError={payError}
                   busy={paying}
+                  referral={referral}
+                  discount={discount}
+                  refInput={refInput}
+                  refBusy={refBusy}
+                  onRefInput={(v) => {
+                    setRefInput(v);
+                    setErr((prev) => {
+                      if (!prev.ref) return prev;
+                      const next = { ...prev };
+                      delete next.ref;
+                      return next;
+                    });
+                  }}
+                  onApplyRef={() => void applyReferral(refInput)}
+                  onRemoveRef={removeReferral}
                   onPickPay={(m) => {
                     setPay(m);
                     setErr({});

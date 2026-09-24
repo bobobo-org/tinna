@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import type { AppDeps } from '../deps';
 import type { BookingStatus } from '../db/types';
 import { bearerToken, emailSha256, type AuthUser } from '../lib/admin-auth';
@@ -22,10 +22,12 @@ const BOOKING_STATUSES: BookingStatus[] = [
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_RANGE_DAYS = 366;
 
-export function adminRoutes(deps: AppDeps) {
-  const app = new Hono<AdminEnv>();
-
-  app.use('/admin/*', async (c, next) => {
+/**
+ * 所有 /admin/*：Bearer token（Supabase Auth，Email 已確認）＋在 admins 名單內。
+ * 在 app.ts 對 /admin/* 註冊一次（各個後台路由檔不必重複驗證）
+ */
+export function adminAuth(deps: AppDeps): MiddlewareHandler<AdminEnv> {
+  return async (c, next) => {
     const token = bearerToken(c.req.header('authorization'));
     if (!token) return apiError(c, 401, 'unauthorized', '請先登入後台');
     let user: AuthUser | null = null;
@@ -40,8 +42,12 @@ export function adminRoutes(deps: AppDeps) {
       return apiError(c, 403, 'forbidden', '這個帳號沒有後台權限');
     }
     c.set('adminEmail', user.email);
-    return next();
-  });
+    await next();
+  };
+}
+
+export function adminRoutes(deps: AppDeps) {
+  const app = new Hono<AdminEnv>();
 
   app.get('/admin/me', (c) => c.json({ email: c.get('adminEmail') }));
 

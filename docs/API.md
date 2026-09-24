@@ -183,3 +183,23 @@ apps/api（Railway）與 apps/web（Vercel）之間唯一的介面約定。兩�
 - 預設 `from` = 今天、`to` = `from` + 30 天（台北時間，含 `to` 當天）；區間最多一年；`status` 可選 `pending_payment,awaiting_transfer,confirmed,cancelled,expired,refunded`
 - `200 { "from", "to", "bookings": [{ "orderNo", "status", "payMethod", "amount", "date", "time", "startsAt", "endsAt", "confirmedAt", "service": { "id", "name" }, "customer": { "name", "gender", "birthDate", "birthTime", "birthPlace", "phone", "email" }, "questions", "needsAttention", "attentionReason" }] }`（依開始時間排序，最多 500 筆）
 - 參數不正確 → `400 validation`
+
+## KOL 推薦碼
+
+### `GET /referral/:code?kind=booking|vip|shop`（公開）
+- 下單前預覽：`200 { "code": "AMY10", "discountType": "percent | amount", "discountValue": 10, "label": "9 折" }`
+- 找不到 → `404 invalid_code`；停用、不適用、未開始、過期、達使用上限 → `409 referral_unusable`（`message` 可直接顯示）
+- 代碼不分大小寫（一律轉大寫），格式 `^[A-Z0-9_-]{3,20}$`
+
+### `POST /bookings` 的 `referral_code`
+- 選填；有給就在建立預約時依 DB 設定重算：打折四捨五入到元、折抵金額不超過原價、實付至少 1 元；回應的 `amount` 為折扣後金額
+- 無效或不能用 → `400 validation`，`fields.referral_code`（訊息同上）
+- 成功時記一筆 `referral_uses`（原價、折扣、實付、佣金 = 實付 × 佣金比例四捨五入）；可用次數只算已付款或保留中的訂單
+
+### 後台
+- `GET /admin/kols` → `{ kols: [{ id, name, contact, note, active, createdAt, codes: [推薦碼] }] }`
+- `POST /admin/kols { name, contact?, note? }`、`PATCH /admin/kols/:id { name?, contact?, note?, active? }`
+- `POST /admin/referral-codes { kolId, code, discountType, discountValue, commissionRate?, appliesBooking?, appliesVip?, appliesShop?, startsOn?, endsOn?, maxUses? }`（日期 `YYYY-MM-DD`，結束日含當天；打折最多 90%；代碼重複 `409 duplicate`）
+- `PATCH /admin/referral-codes/:id`（同上欄位皆選填，另可 `active`；代碼與 KOL 不可改）
+- `GET /admin/referral-stats?from=YYYY-MM-DD[&to=YYYY-MM-DD]`（預設本月；沒給 `to` 時到 `from` 所在月份月底）→ `{ from, to, kols: [{ kolId, name, active, orders, pending, revenue, discount, commission }], codes: [...同上以推薦碼統計], uses: [{ orderNo, kind, code, kolName, createdAt, originalAmount, discountAmount, finalAmount, commissionAmount, state: "paid | pending | cancelled" }] }`；`orders`／`revenue`／`discount`／`commission` 只算已付款
+

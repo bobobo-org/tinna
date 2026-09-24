@@ -108,3 +108,67 @@ export const PAY_METHOD_LABELS: Record<AdminBookingRow['payMethod'], string> = {
   atm: 'ATM',
   vip: 'VIP 堂數',
 };
+
+// ---------- KOL 推薦碼 ----------
+
+export interface AdminReferralCode {
+  id: string;
+  code: string;
+  kolId: string;
+  kolName: string;
+  discountType: 'percent' | 'amount';
+  discountValue: number;
+  label: string;
+  commissionRate: number;
+  appliesBooking: boolean;
+  appliesVip: boolean;
+  appliesShop: boolean;
+  startsOn: string | null;
+  endsOn: string | null;
+  maxUses: number | null;
+  active: boolean;
+  createdAt: string;
+}
+
+export interface AdminKol {
+  id: string;
+  name: string;
+  contact: string | null;
+  note: string | null;
+  active: boolean;
+  createdAt: string;
+  codes: AdminReferralCode[];
+}
+
+export interface ReferralSum {
+  orders: number;
+  pending: number;
+  revenue: number;
+  discount: number;
+  commission: number;
+}
+
+export interface ReferralStats {
+  from: string;
+  to: string;
+  kols: (ReferralSum & { kolId: string; name: string; active: boolean })[];
+  codes: (ReferralSum & { codeId: string; code: string; kolId: string })[];
+  uses: {
+    orderNo: string;
+    kind: 'booking' | 'vip' | 'shop';
+    code: string;
+    kolName: string;
+    createdAt: string;
+    originalAmount: number;
+    discountAmount: number;
+    finalAmount: number;
+    commissionAmount: number;
+    state: 'paid' | 'pending' | 'cancelled';
+  }[];
+}
+
+export const ORDER_KIND_LABELS: Record<ReferralStats['uses'][number]['kind'], string> = {
+  booking: '預約',
+  vip: 'VIP',
+  shop: '商店',
+};

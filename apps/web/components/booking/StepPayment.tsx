@@ -1,7 +1,9 @@
 import type { Ref } from 'react';
 import type { PayAvailability } from '@/lib/booking/payments';
 import type { FieldErrors, PayMethod, PaymentConfig } from '@/lib/booking/types';
-import { errorCls, focusRingWithin } from './styles';
+import type { ReferralPreview } from '@/lib/referral';
+import { formatPrice } from '@/lib/services';
+import { errorCls, focusRingWithin, inputCls } from './styles';
 
 const PAY_DEFS: { id: PayMethod; label: string; sub: string }[] = [
   { id: 'card', label: '信用卡', sub: 'VISA / Master / JCB' },
@@ -27,6 +29,13 @@ export default function StepPayment({
   notice,
   payError,
   busy,
+  referral,
+  discount,
+  refInput,
+  refBusy,
+  onRefInput,
+  onApplyRef,
+  onRemoveRef,
   onPickPay,
   onToggleAgree,
   headingRef,
@@ -41,6 +50,15 @@ export default function StepPayment({
   payError: string | null;
   /** 付款處理中：鎖住選項，避免送出途中改付款方式 */
   busy: boolean;
+  /** 已套用的 KOL 推薦碼 */
+  referral: ReferralPreview | null;
+  /** 推薦碼折抵的金額 */
+  discount: number;
+  refInput: string;
+  refBusy: boolean;
+  onRefInput: (v: string) => void;
+  onApplyRef: () => void;
+  onRemoveRef: () => void;
   onPickPay: (m: PayMethod) => void;
   onToggleAgree: (v: boolean) => void;
   headingRef: Ref<HTMLHeadingElement>;
@@ -115,6 +133,59 @@ export default function StepPayment({
       )}
       {pay === 'line' && <div className={infoCls}>點擊付款後將跳轉至 LINE Pay 完成付款，完成後自動返回本頁。</div>}
       {pay === 'atm' && <div className={infoCls}>送出後會產生專屬虛擬帳號，請於 24 小時內完成轉帳；逾時時段將自動釋出。</div>}
+
+      <div className="flex flex-col gap-2">
+        <label htmlFor="bk-ref" className="text-[14px] text-ink-600">
+          推薦碼（選填）
+        </label>
+        {referral ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-rose-600/30 bg-soft px-4 py-3 text-[14px] text-ink-700">
+            <span>
+              已套用 <b className="text-rose-800">{referral.code}</b>：{referral.label}
+              {discount > 0 ? `，折抵 ${formatPrice(discount)}` : ''}
+            </span>
+            <button type="button" onClick={onRemoveRef} disabled={busy} className="text-[13px] text-rose-800 underline underline-offset-4">
+              移除
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              id="bk-ref"
+              name="referral"
+              value={refInput}
+              onChange={(e) => onRefInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || e.nativeEvent.isComposing) return;
+                e.preventDefault();
+                onApplyRef();
+              }}
+              placeholder="例：AMY10"
+              maxLength={20}
+              autoCapitalize="characters"
+              autoComplete="off"
+              spellCheck={false}
+              disabled={busy}
+              aria-invalid={errors.ref ? true : undefined}
+              aria-describedby={errors.ref ? 'bk-ref-err' : undefined}
+              className={`${inputCls} min-w-0 flex-1 uppercase`}
+            />
+            <button
+              type="button"
+              onClick={onApplyRef}
+              disabled={busy || refBusy || !refInput.trim()}
+              className="shrink-0 rounded-[10px] border border-rose-600/40 bg-white px-4 text-[15px] text-rose-800 hover:bg-soft disabled:opacity-50"
+            >
+              {refBusy ? '確認中…' : '套用'}
+            </button>
+          </div>
+        )}
+        {errors.ref && (
+          <span id="bk-ref-err" className={errorCls}>
+            {errors.ref}
+          </span>
+        )}
+      </div>
 
       {config?.paymentEnv === 'stage' && (
         <p className="-mt-2 text-[12px] leading-[1.8] text-ink-400">

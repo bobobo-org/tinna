@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import Footer from '@/components/Footer';
 import JsonLd from '@/components/JsonLd';
 import Nav from '@/components/Nav';
+import ReferralCapture from '@/components/ReferralCapture';
 import RevealObserver from '@/components/RevealObserver';
 import SatinSweep from '@/components/SatinSweep';
 import { FONT_CSS_URL, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from '@/lib/site';
@@ -77,6 +78,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Footer />
         </div>
         <RevealObserver />
+        <ReferralCapture />
       </body>
     </html>
   );

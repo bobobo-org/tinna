@@ -4,6 +4,7 @@ import type { BookingPublic, PayMethod } from '../db/types';
 import { BOOKING_LEAD_MS, computeDay, isAllowedMonth } from '../lib/availability';
 import { MSG, validateBookingBody } from '../lib/booking-schema';
 import { apiError, readJsonObject, requestIp } from '../lib/http';
+import { errorFields } from '../lib/log';
 import { generateOrderNo, isOrderNo } from '../lib/order-no';
 import {
   ATM_MIN_LEAD_HOURS,
@@ -13,6 +14,7 @@ import {
 } from '../lib/policy';
 import { rateLimitKey } from '../lib/rate-limit';
 import { composeTopicQuestions } from '../lib/topics';
+import { resolveReferral, type ResolvedReferral } from '../services/referral';
 import {
   HOUR_MS,
   MINUTE_MS,
@@ -106,6 +108,16 @@ export function bookingRoutes(deps: AppDeps) {
     const methodMsg = methodUnavailableMessage(deps, d.pay_method);
     if (methodMsg) return apiError(c, 400, 'validation', methodMsg, { pay_method: methodMsg });
 
+    // KOL 推薦碼：折扣後的金額一樣由 DB 設定計算
+    let amount = service.price;
+    let referral: ResolvedReferral | null = null;
+    if (d.referral_code) {
+      const r = await resolveReferral(deps, d.referral_code, 'booking', service.price, now);
+      if (!r.ok) return apiError(c, 400, 'validation', r.message, { referral_code: r.message });
+      referral = r;
+      amount = r.final;
+    }
+
     const startsAt = fromTaipei(d.date, d.time);
     if (!isAllowedMonth(d.date.slice(0, 7), now) || startsAt.getTime() < now.getTime() + BOOKING_LEAD_MS) {
       return apiError(c, 409, 'slot_unavailable', MSG_SLOT_UNAVAILABLE);
@@ -136,7 +148,7 @@ export function bookingRoutes(deps: AppDeps) {
         startsAt,
         endsAt,
         payMethod: d.pay_method,
-        amount: service.price,
+        amount,
         holdExpiresAt,
         customerName: d.name,
         gender: d.gender,
@@ -148,18 +160,36 @@ export function bookingRoutes(deps: AppDeps) {
         questions: questions || null,
       }, { maxPendingPerCustomer: MAX_PENDING_PER_CUSTOMER, maxPendingAtm: MAX_PENDING_ATM });
       if (r.ok) {
+        if (referral) {
+          // 記錄失敗不影響預約本身（只是這筆不算進 KOL 成效）
+          try {
+            await deps.db.recordReferralUse({
+              codeId: referral.code.id,
+              kind: 'booking',
+              orderNo,
+              bookingId: r.id,
+              originalAmount: referral.original,
+              discountAmount: referral.discount,
+              finalAmount: referral.final,
+              commissionAmount: referral.commission,
+            });
+          } catch (e) {
+            deps.logger.error('referral.record_failed', { order: orderNo, ...errorFields(e) });
+          }
+        }
         deps.logger.info('booking.created', {
           order: orderNo,
           service: service.id,
           starts_at: toTaipeiIso(startsAt),
           method: d.pay_method,
           replaced: r.replaced,
+          referral: referral?.code.code ?? null,
         });
         return c.json(
           {
             bookingId: r.id,
             orderNo,
-            amount: service.price,
+            amount,
             payMethod: d.pay_method,
             holdExpiresAt: toTaipeiIso(holdExpiresAt),
           },

@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { AuthVerifier } from '../lib/admin-auth';
+import type { ReferralCode } from '../lib/referral';
 import { normalizeTime } from '../lib/time';
 import {
   ACTIVE_STATUSES,
@@ -16,11 +17,18 @@ import {
   type EmailKind,
   type FailedResult,
   type FlagResult,
+  type Kol,
+  type KolPatch,
   type NewBooking,
+  type NewKol,
   type NewPayment,
+  type NewReferralCode,
+  type NewReferralUse,
   type PaidResult,
   type PaymentRow,
   type Provider,
+  type ReferralCodePatch,
+  type ReferralUseRow,
   type Service,
   type WeeklySlotRow,
 } from './types';
@@ -70,6 +78,67 @@ function toService(r: Row): Service {
     topicLimit: r.topic_limit ?? null,
     questionRequired: r.question_required === true,
   };
+}
+
+const REFERRAL_CODE_COLUMNS =
+  'id,code,kol_id,discount_type,discount_value,commission_rate,applies_booking,applies_vip,applies_shop,starts_at,ends_at,max_uses,active,created_at,kol:kols(name,active)';
+
+function mapReferralCode(r: Row): ReferralCode {
+  return {
+    id: r.id,
+    code: r.code,
+    kolId: r.kol_id,
+    kolName: r.kol?.name ?? '',
+    kolActive: r.kol?.active !== false,
+    discountType: r.discount_type,
+    discountValue: r.discount_value,
+    commissionRate: Number(r.commission_rate),
+    appliesBooking: !!r.applies_booking,
+    appliesVip: !!r.applies_vip,
+    appliesShop: !!r.applies_shop,
+    startsAt: toDate(r.starts_at),
+    endsAt: toDate(r.ends_at),
+    maxUses: r.max_uses ?? null,
+    active: !!r.active,
+    createdAt: new Date(r.created_at),
+  };
+}
+
+/** NewReferralCode／patch → DB 欄位（只放有給的欄位） */
+function referralCodeRow(c: Partial<NewReferralCode>): Row {
+  const row: Row = {};
+  if (c.code !== undefined) row.code = c.code;
+  if (c.kolId !== undefined) row.kol_id = c.kolId;
+  if (c.discountType !== undefined) row.discount_type = c.discountType;
+  if (c.discountValue !== undefined) row.discount_value = c.discountValue;
+  if (c.commissionRate !== undefined) row.commission_rate = c.commissionRate;
+  if (c.appliesBooking !== undefined) row.applies_booking = c.appliesBooking;
+  if (c.appliesVip !== undefined) row.applies_vip = c.appliesVip;
+  if (c.appliesShop !== undefined) row.applies_shop = c.appliesShop;
+  if (c.startsAt !== undefined) row.starts_at = c.startsAt ? c.startsAt.toISOString() : null;
+  if (c.endsAt !== undefined) row.ends_at = c.endsAt ? c.endsAt.toISOString() : null;
+  if (c.maxUses !== undefined) row.max_uses = c.maxUses;
+  return row;
+}
+
+function mapKol(r: Row): Kol {
+  return {
+    id: r.id,
+    name: r.name,
+    contact: r.contact ?? null,
+    note: r.note ?? null,
+    active: !!r.active,
+    createdAt: new Date(r.created_at),
+  };
+}
+
+/** 推薦碼使用紀錄對應的訂單狀態：已付款／保留中／已取消（取消、逾時、退款、保留過期） */
+function referralOrderState(kind: string, booking: Row | null, now: Date): 'paid' | 'pending' | 'cancelled' {
+  if (kind !== 'booking' || !booking) return 'cancelled';
+  if (booking.status === 'confirmed') return 'paid';
+  if (booking.status === 'awaiting_transfer') return 'pending';
+  if (booking.status === 'pending_payment' && booking.hold_expires_at && new Date(booking.hold_expires_at) > now) return 'pending';
+  return 'cancelled';
 }
 
 const ADMIN_BOOKING_COLUMNS =
@@ -368,6 +437,109 @@ export class SupabaseDb implements Db {
     const { data, error } = await query;
     if (error) fail('listBookingsAdmin', error);
     return (data ?? []).map(mapAdminBooking);
+  }
+
+  // ---------- KOL 推薦碼 ----------
+
+  async findReferralCode(code: string): Promise<ReferralCode | null> {
+    const { data, error } = await this.sb.from('referral_codes').select(REFERRAL_CODE_COLUMNS).eq('code', code).maybeSingle();
+    if (error) fail('findReferralCode', error);
+    return data ? mapReferralCode(data) : null;
+  }
+
+  async countLiveReferralUses(codeId: string, now: Date): Promise<number> {
+    const { data, error } = await this.sb
+      .from('referral_uses')
+      .select('id,order_kind,booking:bookings(status,hold_expires_at)')
+      .eq('code_id', codeId);
+    if (error) fail('countLiveReferralUses', error);
+    return (data ?? []).filter((r: Row) => referralOrderState(r.order_kind, r.booking, now) !== 'cancelled').length;
+  }
+
+  async recordReferralUse(u: NewReferralUse): Promise<void> {
+    const { error } = await this.sb.from('referral_uses').insert({
+      code_id: u.codeId,
+      order_kind: u.kind,
+      order_no: u.orderNo,
+      booking_id: u.bookingId,
+      original_amount: u.originalAmount,
+      discount_amount: u.discountAmount,
+      final_amount: u.finalAmount,
+      commission_amount: u.commissionAmount,
+    });
+    if (error) fail('recordReferralUse', error);
+  }
+
+  async listKols(): Promise<Kol[]> {
+    const { data, error } = await this.sb.from('kols').select('*').order('created_at', { ascending: true });
+    if (error) fail('listKols', error);
+    return (data ?? []).map(mapKol);
+  }
+
+  async createKol(k: NewKol): Promise<Kol> {
+    const { data, error } = await this.sb.from('kols').insert({ name: k.name, contact: k.contact, note: k.note }).select('*').single();
+    if (error) fail('createKol', error);
+    return mapKol(data);
+  }
+
+  async updateKol(id: string, patch: KolPatch): Promise<Kol | null> {
+    const { data, error } = await this.sb.from('kols').update(patch).eq('id', id).select('*').maybeSingle();
+    if (error) fail('updateKol', error);
+    return data ? mapKol(data) : null;
+  }
+
+  async listReferralCodes(): Promise<ReferralCode[]> {
+    const { data, error } = await this.sb.from('referral_codes').select(REFERRAL_CODE_COLUMNS).order('created_at', { ascending: true });
+    if (error) fail('listReferralCodes', error);
+    return (data ?? []).map(mapReferralCode);
+  }
+
+  async createReferralCode(c: NewReferralCode): Promise<ReferralCode | 'duplicate' | 'no_kol'> {
+    const { data, error } = await this.sb
+      .from('referral_codes')
+      .insert(referralCodeRow(c))
+      .select(REFERRAL_CODE_COLUMNS)
+      .single();
+    if (error?.code === '23505') return 'duplicate';
+    if (error?.code === '23503') return 'no_kol';
+    if (error) fail('createReferralCode', error);
+    return mapReferralCode(data);
+  }
+
+  async updateReferralCode(id: string, patch: ReferralCodePatch): Promise<ReferralCode | null> {
+    const row: Row = referralCodeRow(patch);
+    if (patch.active !== undefined) row.active = patch.active;
+    const { data, error } = await this.sb.from('referral_codes').update(row).eq('id', id).select(REFERRAL_CODE_COLUMNS).maybeSingle();
+    if (error) fail('updateReferralCode', error);
+    return data ? mapReferralCode(data) : null;
+  }
+
+  async listReferralUses(q: { from: Date; to: Date; now: Date }): Promise<ReferralUseRow[]> {
+    const { data, error } = await this.sb
+      .from('referral_uses')
+      .select(
+        'id,code_id,order_kind,order_no,booking_id,original_amount,discount_amount,final_amount,commission_amount,created_at,code:referral_codes(code,kol_id),booking:bookings(status,hold_expires_at)',
+      )
+      .gte('created_at', q.from.toISOString())
+      .lt('created_at', q.to.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(2000);
+    if (error) fail('listReferralUses', error);
+    return (data ?? []).map((r: Row) => ({
+      id: r.id,
+      codeId: r.code_id,
+      code: r.code?.code ?? '',
+      kolId: r.code?.kol_id ?? '',
+      kind: r.order_kind,
+      orderNo: r.order_no,
+      bookingId: r.booking_id ?? null,
+      originalAmount: r.original_amount,
+      discountAmount: r.discount_amount,
+      finalAmount: r.final_amount,
+      commissionAmount: r.commission_amount,
+      createdAt: new Date(r.created_at),
+      orderState: referralOrderState(r.order_kind, r.booking, q.now),
+    }));
   }
 
   async insertPayment(p: NewPayment): Promise<PaymentRow> {
