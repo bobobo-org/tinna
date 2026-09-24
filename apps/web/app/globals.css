@@ -142,3 +142,9 @@
     }
   }
 }
+
+/* 後台（components/admin/AdminShell.tsx 在 <html> 加 .admin-mode）：不顯示前台頁尾與流光 */
+.admin-mode footer,
+.admin-mode [data-satin-sweep] {
+  display: none;
+}

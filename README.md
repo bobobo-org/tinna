@@ -69,6 +69,12 @@ flowchart LR
 **問題欄必填的方案（接住你的諮詢室）**
 - `services` 表的 `question_label` 是預約 Step 3 問題欄的標題（空的用預設「想問的問題」），`question_required = true` 時必填。`listen`（接住你的諮詢室）目前是「這次的煩惱是什麼？」且必填。
 
+**網站後台（`/admin`）**
+- 網址：`https://yuanshe.vercel.app/admin`。只有管理者名單內的 Email 能用（名單在 Supabase 的 `admins` 表，存的是 Email 的 sha256，repo 是公開的所以不放明碼）。
+- 第一次使用：在登入頁按「第一次使用：設定密碼」→ 到信箱點確認連結 → 回到登入頁用 Email＋密碼登入。忘記密碼可在登入頁寄重設信。
+- 確認信／重設信的連結要能回到網站，需在 Supabase 後台 **Authentication → URL Configuration** 設定：Site URL 填正式網址，Redirect URLs 加入 `<正式網址>/admin/login`。沒設定時連結會打開錯誤頁面，但帳號仍會完成確認，直接回登入頁登入即可。
+- 目前功能：接下來 7 天的預約總覽、預約列表（日期／狀態篩選、顧客資料與問題、下載 CSV）。
+
 **公休／請假／加開時段**
 - Supabase 的 **`date_overrides`** 表，主鍵是 `date`（單一日期）：`closed = true` 表示當天公休或請假；`extra_times` 是當天加開的時段陣列。直接在 Supabase 後台新增／編輯這張表的資料列。
 
@@ -85,7 +91,7 @@ flowchart LR
 - [ ] **接上正式寄信**：到 Resend 驗證寄件網域，設定 `RESEND_API_KEY`、`MAIL_FROM`（必須是已驗證網域的寄件地址）。這兩個沒設之前，系統只會「記錄」要寄的信（收件網域＋主旨），不會真的寄出，預約流程本身不受影響。另外兩個相關變數：`ADMIN_EMAIL`（老師收新訂單與異常通知的信箱，可逗號分隔多個）、`MEET_URL`（確認信裡的固定視訊連結，沒設會寫「視訊連結將於諮詢前另行寄送」）。
 - [ ] **綁正式網域**：在 Vercel 幫網站綁上正式網域後，記得同步改兩個環境變數：Railway 的 `WEB_URL`（CORS 白名單來源、付款完成後導回網址）、Vercel 的 `NEXT_PUBLIC_SITE_URL`（canonical／OG／robots／sitemap 用），不然 SEO 相關的網址還是會指向 `*.vercel.app`。
 - [ ] **換掉佔位圖**：見上面「換人物照片」，目前 Hero 與老師頁都是 SVG 佔位圖；原型設計稿裡的人物照（`design_handoff_yuanshe/design/uploads/`）帶有其他網站的浮水印，已被 `.gitignore` 排除、不會進版控，**不能直接拿來用**。
-- [ ] **沒有管理後台**：`apps/web` 沒有 `/admin` 之類的路由，`apps/api` 也沒有任何列出訂單的端點；要看預約與付款紀錄，現況只能直接進 **Supabase 後台**（Table Editor）查 `bookings`／`payments` 兩張表。這兩張表的 RLS 對 `anon`／`authenticated` 完全不開放（連 `select` 都不行），是刻意的資安設計，但也代表沒有其他工具能繞過 Supabase 後台讀到這兩張表。
+- [ ] **後台登入設定**：`/admin` 已可查看預約（見「4. 常見修改怎麼做」的網站後台）。上線前到 Supabase 設定 Authentication → URL Configuration（Site URL、Redirect URLs），確認信與重設密碼信的連結才會回到網站。`bookings`／`payments` 對 `anon`／`authenticated` 仍完全不開放，後台是經由 API（service_role）讀取。
 - [ ] **信用卡收單方式**：目前走綠界「全方位金流」代收（`AioCheckOut`），網站與 API 都不會經手、也不會儲存卡號；刷卡是導去綠界站外頁面完成，上線前不需要額外處理 PCI 合規。
 
 ## 6. 本機開發

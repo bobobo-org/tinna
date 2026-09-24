@@ -6,6 +6,7 @@ export default function SatinSweep() {
   return (
     <div
       aria-hidden="true"
+      data-satin-sweep
       className="pointer-events-none fixed inset-0 z-30 overflow-hidden mix-blend-soft-light motion-reduce:hidden"
     >
       <div className="absolute left-0 top-[-20%] h-[140%] w-[22vw] animate-satin-sweep bg-sweep" />

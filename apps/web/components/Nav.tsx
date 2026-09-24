@@ -57,6 +57,9 @@ export default function Nav() {
     };
   }, [open]);
 
+  // 後台有自己的外框（components/admin/AdminShell.tsx）
+  if (pathname.startsWith('/admin')) return null;
+
   return (
     <>
       <header className="satin sticky top-0 z-20 flex flex-wrap items-center justify-between gap-4 border-b border-white/70 py-3 pl-[max(16px,env(safe-area-inset-left))] pr-[max(16px,env(safe-area-inset-right))] shadow-nav md:py-4 md:pl-[max(clamp(20px,4vw,48px),env(safe-area-inset-left))] md:pr-[max(clamp(20px,4vw,48px),env(safe-area-inset-right))]">
