@@ -266,6 +266,16 @@ export default function BookingFlow({ services, serverNow }: { services: Service
     return () => window.removeEventListener('pageshow', onShow);
   }, []);
 
+  // 「上一步」走 history.go，瀏覽器預設會還原離開那一步時的捲動位置（常停在頁底），
+  // 蓋掉下面「換步驟捲到表單卡頂端」→ 預約頁期間改由我們自己管理捲動
+  useEffect(() => {
+    const prev = window.history.scrollRestoration;
+    window.history.scrollRestoration = 'manual';
+    return () => {
+      window.history.scrollRestoration = prev;
+    };
+  }, []);
+
   // ---------- 換步驟：捲到表單卡頂端、焦點移到步驟標題 ----------
   const prevStep = useRef(step);
   useEffect(() => {
