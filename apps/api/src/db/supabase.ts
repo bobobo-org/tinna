@@ -8,6 +8,7 @@ import {
   type BookingFull,
   type BookingLimits,
   type BookingPublic,
+  type BookingStatus,
   type BusyBooking,
   type CreateBookingResult,
   type DateOverrideRow,
