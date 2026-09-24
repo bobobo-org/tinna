@@ -632,6 +632,7 @@ export default function BookingFlow({ services, serverNow }: { services: Service
         topics: cur.topics,
         topicNote: cur.topicNote,
         referral: cur.referral?.code ?? '',
+        vipCard: cur.vipCard,
       });
       return redirectToPayment(o, retried);
     } catch (e) {
