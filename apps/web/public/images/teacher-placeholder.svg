@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 460">
+  <!-- 佔位圖：粉色緞面 + 拱形 + 珍珠項鍊。換真圖改 lib/site.ts 的 TEACHER_IMAGE -->
+  <defs>
+    <linearGradient id="satin" x1="0" y1="0" x2="1" y2=".62">
+      <stop offset="0" stop-color="#ffd9e6"/>
+      <stop offset=".16" stop-color="#fff0f5"/>
+      <stop offset=".34" stop-color="#ffb9d0"/>
+      <stop offset=".48" stop-color="#ffe2ec"/>
+      <stop offset=".66" stop-color="#f9a3c0"/>
+      <stop offset=".82" stop-color="#ffe7f0"/>
+      <stop offset="1" stop-color="#ffc7db"/>
+    </linearGradient>
+    <radialGradient id="pearl" cx=".32" cy=".28" r=".99">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset=".42" stop-color="#ffb3cc"/>
+      <stop offset="1" stop-color="#c33566"/>
+    </radialGradient>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#fff" stop-opacity=".9"/>
+      <stop offset=".5" stop-color="#ffd3e2" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#ffd3e2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="400" height="460" fill="url(#satin)"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M-60 60C90-20 200 150 330 60S470 30 480 80" stroke="#fff" stroke-opacity=".18" stroke-width="80"/>
+    <path d="M-60 60C90-20 200 150 330 60S470 30 480 80" stroke="#fff" stroke-opacity=".5" stroke-width="6"/>
+    <path d="M-60 380C110 310 230 470 380 380S470 360 480 400" stroke="#ec7ea5" stroke-opacity=".16" stroke-width="70"/>
+    <path d="M-60 420C110 350 230 510 380 420" stroke="#fff" stroke-opacity=".35" stroke-width="5"/>
+    <path d="M50 472V230a150 150 0 0 1 300 0v242" stroke="#fff" stroke-opacity=".8" stroke-width="2"/>
+    <path d="M64 472V232a136 136 0 0 1 272 0v240" stroke="#fff" stroke-opacity=".4" stroke-width="1"/>
+    <path d="M100 130Q200 270 300 130" stroke="#fff" stroke-opacity=".7" stroke-width="1.5"/>
+  </g>
+  <circle cx="200" cy="262" r="130" fill="url(#glow)"/>
+  <g fill="url(#pearl)">
+    <circle cx="100" cy="130" r="7"/>
+    <circle cx="125" cy="161" r="8"/>
+    <circle cx="150" cy="183" r="9"/>
+    <circle cx="175" cy="196" r="9.5"/>
+    <circle cx="200" cy="200" r="10"/>
+    <circle cx="225" cy="196" r="9.5"/>
+    <circle cx="250" cy="183" r="9"/>
+    <circle cx="275" cy="161" r="8"/>
+    <circle cx="300" cy="130" r="7"/>
+    <circle cx="200" cy="216" r="5"/>
+    <circle cx="200" cy="270" r="50"/>
+  </g>
+  <ellipse cx="182" cy="250" rx="16" ry="10" fill="#fff" fill-opacity=".6" transform="rotate(-32 182 250)"/>
+</svg>

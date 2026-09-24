@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    /* 原型沒設 line-height（瀏覽器預設 normal），把 preflight 的 1.5 改回來，行高才會和原型一致 */
+    line-height: normal;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    background: theme('colors.page');
+    font-family: theme('fontFamily.sans');
+    color: theme('colors.ink.900');
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font-family: inherit;
+  }
+
+  /* 鍵盤操作才顯示的 focus 樣式（滑鼠/觸控點擊不會出現） */
+  :focus-visible {
+    outline: 2px solid theme('colors.rose.600');
+    outline-offset: 2px;
+  }
+
+  /* 手機選單開啟時：鎖住背景捲動（Nav 會在 <html> 加上 .menu-open） */
+  html.menu-open,
+  html.menu-open body {
+    overflow: hidden;
+  }
+}
+
+@layer components {
+  /*
+   * 緞面：全站共用同一組漸層
+   * - 手機（< 760px）：scroll + 100% 100%（iOS Safari 不支援 fixed）
+   * - 桌機：fixed + 100vw 100vh，固定在 viewport，相鄰緞面區塊紋理無縫接續
+   */
+  .satin {
+    background-image: theme('backgroundImage.satin');
+    background-attachment: scroll;
+    background-size: 100% 100%;
+  }
+
+  @media (min-width: theme('screens.md')) {
+    .satin {
+      background-attachment: fixed;
+      background-size: 100vw 100vh;
+    }
+  }
+}

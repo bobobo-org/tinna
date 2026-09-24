@@ -1,0 +1,3 @@
+# Next 自動產生（內容會隨 NEXT_DIST_DIR 變動，Next 官方建議不進版控）
+next-env.d.ts
+*.tsbuildinfo

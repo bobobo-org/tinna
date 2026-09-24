@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 600">
+  <!-- 佔位圖：粉色緞面 + 拱形 + 珍珠。換真圖改 lib/site.ts 的 HERO_IMAGE -->
+  <defs>
+    <linearGradient id="satin" x1="0" y1="0" x2="1" y2=".62">
+      <stop offset="0" stop-color="#ffd9e6"/>
+      <stop offset=".16" stop-color="#fff0f5"/>
+      <stop offset=".34" stop-color="#ffb9d0"/>
+      <stop offset=".48" stop-color="#ffe2ec"/>
+      <stop offset=".66" stop-color="#f9a3c0"/>
+      <stop offset=".82" stop-color="#ffe7f0"/>
+      <stop offset="1" stop-color="#ffc7db"/>
+    </linearGradient>
+    <radialGradient id="pearl" cx=".32" cy=".28" r=".99">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset=".42" stop-color="#ffb3cc"/>
+      <stop offset="1" stop-color="#c33566"/>
+    </radialGradient>
+    <radialGradient id="glow" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#fff" stop-opacity=".95"/>
+      <stop offset=".45" stop-color="#ffd3e2" stop-opacity=".7"/>
+      <stop offset="1" stop-color="#ffd3e2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="480" height="600" fill="url(#satin)"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M-80 150C80 60 220 250 380 150S560 110 600 170" stroke="#fff" stroke-opacity=".16" stroke-width="80"/>
+    <path d="M-80 150C80 60 220 250 380 150S560 110 600 170" stroke="#fff" stroke-opacity=".28" stroke-width="30"/>
+    <path d="M-80 150C80 60 220 250 380 150S560 110 600 170" stroke="#fff" stroke-opacity=".55" stroke-width="6"/>
+    <path d="M-80 270C100 190 240 370 420 270S560 240 600 290" stroke="#ec7ea5" stroke-opacity=".16" stroke-width="70"/>
+    <path d="M-80 480C120 410 260 570 440 480S560 460 600 510" stroke="#fff" stroke-opacity=".2" stroke-width="90"/>
+    <path d="M-80 480C120 410 260 570 440 480S560 460 600 510" stroke="#fff" stroke-opacity=".45" stroke-width="8"/>
+    <path d="M72 612V244a168 168 0 0 1 336 0v368" stroke="#fff" stroke-opacity=".8" stroke-width="2"/>
+    <path d="M88 612V246a152 152 0 0 1 304 0v366" stroke="#fff" stroke-opacity=".4" stroke-width="1"/>
+  </g>
+  <circle cx="240" cy="318" r="176" fill="url(#glow)"/>
+  <g fill="url(#pearl)">
+    <circle cx="136" cy="258" r="8"/>
+    <circle cx="163" cy="226" r="8.5"/>
+    <circle cx="199" cy="205" r="9"/>
+    <circle cx="240" cy="198" r="10"/>
+    <circle cx="281" cy="205" r="9"/>
+    <circle cx="317" cy="226" r="8.5"/>
+    <circle cx="344" cy="258" r="8"/>
+    <circle cx="240" cy="318" r="76"/>
+  </g>
+  <ellipse cx="212" cy="288" rx="24" ry="14" fill="#fff" fill-opacity=".6" transform="rotate(-32 212 288)"/>
+</svg>

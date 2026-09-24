@@ -1,0 +1,132 @@
+name: CI/CD
+
+# push 到 main：CI 通過後依序 資料庫 migration → API（Railway）→ 網站（Vercel），只部署有變動的部分
+# pull request：只跑 CI
+# 手動執行（Actions → CI/CD → Run workflow）：CI 通過後三個全部重新部署
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: cicd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  ci:
+    name: CI（lint · typecheck · test · build）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  changes:
+    name: 判斷部署範圍
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      db: ${{ steps.filter.outputs.db }}
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            db:
+              - 'supabase/migrations/**'
+            api:
+              - 'apps/api/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.dockerignore'
+            web:
+              - 'apps/web/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+
+  migrate:
+    name: 資料庫 migration（Supabase）
+    needs: [ci, changes]
+    if: needs.changes.outputs.db == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: supabase db push
+        run: supabase db push --db-url "$SUPABASE_DB_URL"
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+
+  deploy-api:
+    name: 部署 API（Railway）
+    needs: [ci, changes, migrate]
+    if: >-
+      always() && needs.ci.result == 'success' && needs.changes.result == 'success' &&
+      (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') &&
+      (needs.changes.outputs.api == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 寫入版本號（/health 會回報）
+        run: echo "$GITHUB_SHA" > apps/api/BUILD_SHA
+      - run: npm install -g @railway/cli
+      - name: railway up
+        run: railway up --ci --service "${{ vars.RAILWAY_SERVICE_ID }}"
+      - name: 等新版上線
+        run: |
+          for i in $(seq 1 40); do
+            body=$(curl -fsS "${{ vars.API_URL }}/health" || true)
+            case "$body" in *"$GITHUB_SHA"*) echo "上線：$body"; exit 0;; esac
+            sleep 15
+          done
+          echo "10 分鐘內沒看到新版本（最後回應：$body）"; exit 1
+
+  deploy-web:
+    name: 部署網站（Vercel）
+    needs: [ci, changes, migrate, deploy-api]
+    if: >-
+      always() && needs.ci.result == 'success' && needs.changes.result == 'success' &&
+      (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') &&
+      (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped') &&
+      (needs.changes.outputs.web == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: vercel deploy --prod
+        run: npx -y vercel@latest deploy --prod --yes --token "${{ secrets.VERCEL_TOKEN }}"
+      - name: 冒煙測試
+        run: |
+          code=$(curl -s -o /tmp/home.html -w '%{http_code}' "${{ vars.WEB_URL }}/")
+          echo "HTTP $code"
+          test "$code" = 200 && grep -q '緣舍命理' /tmp/home.html

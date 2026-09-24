@@ -1,0 +1,17 @@
+node_modules/
+.next/
+.next-*/
+dist/
+coverage/
+*.log
+.DS_Store
+.vercel/
+.env
+.env.*
+!.env.example
+supabase/.temp/
+supabase/.branches/
+# 設計原型的佔位圖有他站浮水印，不可公開
+design_handoff_yuanshe/design/uploads/
+# 驗證截圖
+.shots/
