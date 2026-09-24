@@ -1,3 +1,4 @@
+import BookingSuccess from '@/components/booking/BookingSuccess';
 import { pageMetadata } from '@/lib/metadata';
 
 export const metadata = pageMetadata({
@@ -7,14 +8,16 @@ export const metadata = pageMetadata({
   noindex: true,
 });
 
-/** 占位頁：預約完成頁由下一位 agent 取代（讀 ?order= 查 GET /bookings/:orderNo，見 docs/API.md）。 */
-export default function BookingSuccessPage() {
-  return (
-    <section className="satin px-6 pb-24 pt-[72px]">
-      <div className="mx-auto flex max-w-[560px] flex-col gap-[18px] rounded-3xl bg-white px-9 py-11 text-center shadow-done">
-        <h1 className="font-serif text-[32px] font-bold text-ink-900">預約完成</h1>
-        <p className="text-[15px] leading-[1.9] text-ink-600">建置中</p>
-      </div>
-    </section>
-  );
+/**
+ * 預約完成頁：金流完成後由 API 303 導回 /booking/success?order=<orderNo>
+ * 訂單狀態在瀏覽器端查 GET /bookings/:orderNo（付款確認中要輪詢）
+ */
+export default async function BookingSuccessPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const order = typeof sp.order === 'string' ? sp.order : Array.isArray(sp.order) ? (sp.order[0] ?? null) : null;
+  return <BookingSuccess key={order ?? ''} orderNo={order} serverNow={Date.now()} />;
 }

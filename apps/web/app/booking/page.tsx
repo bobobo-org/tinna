@@ -1,4 +1,7 @@
+import { connection } from 'next/server';
+import BookingFlow from '@/components/booking/BookingFlow';
 import { pageMetadata } from '@/lib/metadata';
+import { getServices } from '@/lib/services';
 
 export const metadata = pageMetadata({
   title: '線上預約',
@@ -7,16 +10,13 @@ export const metadata = pageMetadata({
 });
 
 /**
- * 占位頁：預約 4 步流程由下一位 agent 取代（app/booking/page.tsx）。
- * 注意：這裡不在 (site) group，所以沒有手機浮動 CTA；Nav/Footer 由 root layout 提供。
+ * 線上預約（4 步）。不在 (site) group → 沒有手機浮動 CTA，改用頁面內的 sticky 結帳列。
+ *
+ * 每次請求動態產生：?svc=&step= 深連結在伺服器端就畫出正確的步驟（不會先閃 Step 1），
+ * 伺服器時間傳給前端當「今天」的基準（月曆、可預約月份不受裝置時鐘影響）。
  */
-export default function BookingPage() {
-  return (
-    <section className="bg-booking px-4 pb-6 pt-6 md:px-[clamp(20px,4vw,48px)] md:pb-20 md:pt-10">
-      <div className="mx-auto flex max-w-[1120px] flex-col gap-[18px] md:gap-7">
-        <h1 className="font-serif text-[26px] font-bold text-ink-900 md:text-[34px]">線上預約</h1>
-        <p className="text-[15px] text-ink-600">建置中</p>
-      </div>
-    </section>
-  );
+export default async function BookingPage() {
+  await connection();
+  const services = await getServices();
+  return <BookingFlow services={services} serverNow={Date.now()} />;
 }
