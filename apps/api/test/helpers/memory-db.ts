@@ -232,7 +232,8 @@ export class MemoryDb implements Db {
     const row: MemPayment = {
       id: randomUUID(),
       provider: 'ecpay',
-      method: b.payMethod,
+      // VIP 堂數預約不會有付款紀錄（測試不該走到這裡）
+      method: b.payMethod === 'vip' ? 'card' : b.payMethod,
       providerTxnId: null,
       amount: b.amount,
       status: 'init',
