@@ -69,6 +69,7 @@ export default async function HomePage() {
       {/* 三格服務（整格可點 → 預約 Step 2 並帶入方案） */}
       <section
         aria-label="諮詢方案"
+        data-reveal
         className="grid grid-cols-[repeat(auto-fit,minmax(260px,1fr))] border-t border-white/90 bg-svc-row"
       >
         {homeServices.map((s) => (
@@ -95,10 +96,17 @@ export default async function HomePage() {
       {/* 四步完成預約 */}
       <section className="bg-page px-[clamp(24px,4vw,56px)] py-[72px]">
         <div className="mx-auto max-w-[1100px]">
-          <h2 className="mb-9 font-serif text-[30px] font-bold tracking-[.1em] text-ink-900">四步完成預約</h2>
+          <h2 data-reveal className="mb-9 font-serif text-[30px] font-bold tracking-[.1em] text-ink-900">
+            四步完成預約
+          </h2>
           <ol className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-6 md:grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
-            {FLOW_STEPS.map((p) => (
-              <li key={p.n} className="flex flex-col gap-3">
+            {FLOW_STEPS.map((p, i) => (
+              <li
+                key={p.n}
+                data-reveal
+                style={{ '--reveal-delay': `${i * 120}ms` } as React.CSSProperties}
+                className="flex flex-col gap-3"
+              >
                 <Pearl className="h-11 w-11 font-bold text-white shadow-step">{p.n}</Pearl>
                 <h3 className="font-serif text-[19px] font-semibold text-ink-900">{p.t}</h3>
                 <p className="text-[14px] leading-[1.9] text-ink-600">{p.d}</p>
@@ -111,13 +119,17 @@ export default async function HomePage() {
       {/* 諮詢者說 */}
       <section className="bg-review px-[clamp(24px,4vw,56px)] py-16">
         <div className="mx-auto max-w-[1100px]">
-          <h2 className="mb-8 font-serif text-[30px] font-bold tracking-[.1em] text-ink-900">諮詢者說</h2>
+          <h2 data-reveal className="mb-8 font-serif text-[30px] font-bold tracking-[.1em] text-ink-900">
+            諮詢者說
+          </h2>
           <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,300px),1fr))] gap-[22px]">
-            {TESTIMONIALS.map((t) => (
-              <figure key={t.by} className="rounded-2xl border border-rose-600/[.18] bg-white p-[30px]">
-                <blockquote className="text-[15px] leading-[2.1] text-ink-600">{t.quote}</blockquote>
-                <figcaption className="mt-4 text-[13px] text-ink-400">{t.by}</figcaption>
-              </figure>
+            {TESTIMONIALS.map((t, i) => (
+              <div key={t.by} data-reveal style={{ '--reveal-delay': `${i * 120}ms` } as React.CSSProperties} className="flex">
+                <figure className="lift flex-1 rounded-2xl border border-rose-600/[.18] bg-white p-[30px]">
+                  <blockquote className="text-[15px] leading-[2.1] text-ink-600">{t.quote}</blockquote>
+                  <figcaption className="mt-4 text-[13px] text-ink-400">{t.by}</figcaption>
+                </figure>
+              </div>
             ))}
           </div>
         </div>
@@ -125,7 +137,9 @@ export default async function HomePage() {
 
       {/* 底部 CTA */}
       <section className="satin relative overflow-hidden border-t border-white/90 px-8 py-16 text-center">
-        <h2 className="relative mb-[10px] font-serif text-[34px] font-bold text-ink-900">下一個時段，留給你</h2>
+        <h2 data-reveal className="relative mb-[10px] font-serif text-[34px] font-bold text-ink-900">
+          下一個時段，留給你
+        </h2>
         <p className="relative mb-6 text-[15px] text-ink-600">線上選時段、付款完成即確認</p>
         <Link
           href={bookingHref()}

@@ -37,6 +37,13 @@ export function pageMetadata({
         },
       ],
     },
+    // 分享到 X（Twitter）也用大圖卡片
+    twitter: {
+      card: 'summary_large_image',
+      title: `${title}｜${SITE_NAME}`,
+      description,
+      images: ['/twitter-image.png'],
+    },
     ...(noindex ? { robots: { index: false, follow: true } } : {}),
   };
 }
