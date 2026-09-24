@@ -6,7 +6,7 @@ export const FLOW_STEPS = [
   { n: '1', t: '選擇方案', d: '依想問的主題挑選適合的諮詢方案。' },
   { n: '2', t: '選日期時段', d: '即時顯示老師可預約的空檔。' },
   { n: '3', t: '填寫排盤資料', d: '出生資料與想問的問題，老師事前準備。' },
-  { n: '4', t: '線上付款', d: '信用卡／LINE Pay／ATM，完成即確認。' },
+  { n: '4', t: '線上付款', d: '信用卡／LINE Pay，完成即確認。' },
 ] as const;
 
 export const TESTIMONIALS = [
@@ -52,7 +52,7 @@ export const FAQS = [
   },
   {
     q: '付款方式有哪些？',
-    a: '支援信用卡（VISA / Master / JCB）、LINE Pay 與 ATM 虛擬帳號轉帳，皆可開立電子發票。',
+    a: '支援信用卡（VISA / Master / JCB）與 LINE Pay，皆可開立電子發票。',
   },
   {
     q: '可以幫別人問嗎？',
@@ -62,4 +62,4 @@ export const FAQS = [
 
 export type Faq = (typeof FAQS)[number];
 
-export const FOOTER_ITEMS = ['信用卡', 'LINE Pay', 'ATM 轉帳', '隱私權政策', '退款規則'] as const;
+export const FOOTER_ITEMS = ['信用卡', 'LINE Pay', '隱私權政策', '退款規則'] as const;

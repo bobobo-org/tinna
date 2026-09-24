@@ -41,6 +41,8 @@ export interface Env {
   /** 本 API 對外網址（金流回呼用）；null 表示無法產生回呼網址 → 金流停用 */
   apiUrl: string | null;
   ecpay: EcpayConfig | null;
+  /** ATM 轉帳：預設關閉（ATM_ENABLED=true 才開）；關閉時 /config atm=false、新預約不接受 ATM，既有 ATM 訂單照常處理 */
+  atmEnabled: boolean;
   linepay: LinePayConfig | null;
   mail: MailConfig;
   meetUrl: string | null;
@@ -240,6 +242,7 @@ export function loadEnv(
       webUrl,
       apiUrl,
       ecpay,
+      atmEnabled: str(raw.ATM_ENABLED)?.toLowerCase() === 'true',
       linepay,
       mail: { resendApiKey: mailKey, from, adminEmails },
       meetUrl,

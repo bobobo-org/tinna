@@ -30,7 +30,8 @@ const MSG_ATM_LEAD = `ATM 轉帳需於諮詢開始 ${ATM_MIN_LEAD_HOURS} 小時�
 const MSG_ATM_FULL = 'ATM 轉帳名額暫滿，請改用信用卡';
 
 export function methodUnavailableMessage(deps: AppDeps, method: PayMethod): string | null {
-  if (method === 'line') return deps.linepay ? null : 'LINE Pay 即將開放，請改用信用卡或 ATM 轉帳';
+  if (method === 'line') return deps.linepay ? null : 'LINE Pay 即將開放，請改用信用卡';
+  if (method === 'atm' && !deps.env.atmEnabled) return 'ATM 轉帳已停止服務，請改用信用卡';
   if (!deps.env.ecpay) return method === 'card' ? '信用卡付款即將開放，請改用其他付款方式' : 'ATM 轉帳即將開放，請改用其他付款方式';
   return null;
 }

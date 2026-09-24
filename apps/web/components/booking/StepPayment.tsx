@@ -46,7 +46,10 @@ export default function StepPayment({
   headingRef: Ref<HTMLHeadingElement>;
 }) {
   const { enabled, atmTooSoon, leadHours } = availability;
-  const atmLeadBlocked = atmTooSoon && config?.payments.atm !== false;
+  // ATM 預設關閉：API 明確開放（config atm=true）才顯示這個選項
+  const atmOffered = config?.payments.atm === true;
+  const atmLeadBlocked = atmTooSoon && atmOffered;
+  const defs = PAY_DEFS.filter((p) => p.id !== 'atm' || atmOffered);
 
   return (
     <div className="flex flex-col gap-[18px]">
@@ -66,7 +69,7 @@ export default function StepPayment({
         aria-describedby={errors.pay ? 'bk-pay-err' : undefined}
         className="grid grid-cols-[minmax(0,1fr)] gap-[10px] md:grid-cols-[repeat(auto-fit,minmax(150px,1fr))]"
       >
-        {PAY_DEFS.map((p) => {
+        {defs.map((p) => {
           const on = enabled[p.id];
           const sel = pay === p.id && on;
           const leadBlocked = p.id === 'atm' && atmLeadBlocked;

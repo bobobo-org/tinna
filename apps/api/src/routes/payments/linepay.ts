@@ -10,7 +10,7 @@ import { attemptsExceeded, checkPayable, itemName, paymentRateLimited, paymentUn
 // LINE Pay v3：request 取得付款網址；使用者授權後 LINE Pay 把瀏覽器導到 confirmUrl，
 // 這裡呼叫 Confirm API 成功才算付款完成（confirmUrl 本身沒有簽章，不能單憑它就確認）。
 
-const MSG_UNAVAILABLE = 'LINE Pay 即將開放，請改用信用卡或 ATM 轉帳';
+const MSG_UNAVAILABLE = 'LINE Pay 即將開放，請改用信用卡';
 const MSG_ERROR = 'LINE Pay 暫時無法使用，請稍後再試或改用其他付款方式';
 
 export function linepayRoutes(deps: AppDeps) {

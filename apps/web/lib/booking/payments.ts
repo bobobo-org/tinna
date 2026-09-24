@@ -2,7 +2,8 @@
  * 付款方式能不能用（Step 4）
  *
  * - GET /config 的 payments：false → 停用（例：LINE Pay 未開通）；讀不到 config 視為可用，送出時由 API 判斷
- * - ATM：所選時段距離現在不到 atmMinLeadHours（沒有這個欄位當 72）小時 → 停用
+ * - ATM：預設關閉，只有 config 明確回 atm=true 才開放（API 的 ATM_ENABLED）；
+ *   開放時，所選時段距離現在不到 atmMinLeadHours（沒有這個欄位當 72）小時 → 停用
  */
 
 import type { PayMethod, PaymentConfig } from './types';
@@ -40,7 +41,7 @@ export function payAvailability(
     enabled: {
       card: config?.payments?.card !== false,
       line: config?.payments?.line !== false,
-      atm: config?.payments?.atm !== false && !atmTooSoon,
+      atm: config?.payments?.atm === true && !atmTooSoon,
     },
     atmTooSoon,
     leadHours,

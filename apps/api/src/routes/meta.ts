@@ -12,7 +12,7 @@ export function metaRoutes(deps: AppDeps) {
   app.get('/config', (c) => {
     const ecpay = deps.env.ecpay;
     return c.json({
-      payments: { card: !!ecpay, atm: !!ecpay, line: !!deps.linepay },
+      payments: { card: !!ecpay, atm: !!ecpay && deps.env.atmEnabled, line: !!deps.linepay },
       // 綠界未設定 → null（前端只在 "stage" 時顯示測試環境字樣）
       paymentEnv: ecpay ? ecpay.env : null,
       atmMinLeadHours: ATM_MIN_LEAD_HOURS,

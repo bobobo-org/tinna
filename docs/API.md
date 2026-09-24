@@ -30,7 +30,7 @@ apps/api（Railway）與 apps/web（Vercel）之間唯一的介面約定。兩�
 
 ### `GET /config`
 `200 { "payments": { "card": bool, "atm": bool, "line": bool }, "paymentEnv": "stage" | "prod" | null, "atmMinLeadHours": 72 }`
-- card / atm：綠界參數齊全即為 true；line：LINE Pay 參數齊全才 true
+- card：綠界參數齊全即為 true；atm：綠界參數齊全**且** `ATM_ENABLED=true` 才 true（預設關閉，web 不顯示 ATM 選項）；line：LINE Pay 參數齊全才 true
 - `paymentEnv`：綠界使用中的環境；**綠界未設定時為 `null`**（web 只在 `"stage"` 時顯示測試環境字樣）
 - `atmMinLeadHours`：ATM 只能預約開始時間在這個小時數以後的時段（web 依此停用 ATM 選項）
 - web 端 Step 4 依此把未開通的付款方式顯示為停用（「即將開放」）
@@ -79,7 +79,7 @@ apps/api（Railway）與 apps/web（Vercel）之間唯一的介面約定。兩�
   - `service_id` 必須是「`topic_limit` ≥ 題數」最小的價位（例：5 題 → `topics-6`），否則 `fields.topics`「主題數量與方案不符，請重新整理頁面後再選一次」
   - 主題、備註、`questions` 合併存進 `bookings.questions`（`【自選主題・依優先順序】1. …`），老師的新訂單通知信看得到；其他方案送來的 `topics` 不理會
 - `services.question_required = true` 的方案（`listen` 接住你的諮詢室）：`questions` 必填，空白 → `fields.questions`「請填寫這一欄」
-- 付款方式未開通 → `400 validation`，`fields.pay_method`：「LINE Pay 即將開放，請改用信用卡或 ATM 轉帳」／「信用卡付款即將開放，請改用其他付款方式」／「ATM 轉帳即將開放，請改用其他付款方式」
+- 付款方式未開通 → `400 validation`，`fields.pay_method`：「LINE Pay 即將開放，請改用信用卡」／「信用卡付款即將開放，請改用其他付款方式」／「ATM 轉帳即將開放，請改用其他付款方式」；ATM 關閉（`ATM_ENABLED` 未設為 true）→「ATM 轉帳已停止服務，請改用信用卡」（已取號的 ATM 訂單照常處理）
 - ATM 限制（`400 validation`，`fields.pay_method`）：
   - 開始時間不到 72 小時（`/config` 的 `atmMinLeadHours`）→「ATM 轉帳需於諮詢開始 72 小時前預約，請改用信用卡」
   - 全站未付款的 ATM（取號前 + 待轉帳）已達 5 筆 →「ATM 轉帳名額暫滿，請改用信用卡」
@@ -133,7 +133,7 @@ apps/api（Railway）與 apps/web（Vercel）之間唯一的介面約定。兩�
 `200 { "paymentUrl" }` → web `location.href = paymentUrl`
 - **LINE Pay 訂單的「重新付款」也走這裡**（打 `/payments/ecpay/checkout` 會 `409 invalid_method`）
 - 同一筆訂單上一次的嘗試還在等使用者付款 → 回同一個 `paymentUrl`（不建立新交易）；上一次其實已扣款 → `409 already_paid`
-- LINE Pay 未設定 → `503 { "error": "payment_unavailable", "message": "LINE Pay 即將開放，請改用信用卡或 ATM 轉帳" }`
+- LINE Pay 未設定 → `503 { "error": "payment_unavailable", "message": "LINE Pay 即將開放，請改用信用卡" }`
 - 其他錯誤：`400 validation`、`404 not_found`、`409 invalid_method`（非 LINE Pay 訂單）、`409 expired`、`409 payment_under_review`、`429 rate_limited` / `429 too_many_attempts`、`502 payment_error`（LINE Pay 暫時無法使用或上一筆結果不明）、`415`、`403`
 
 ## 金流回呼（外部 → API）

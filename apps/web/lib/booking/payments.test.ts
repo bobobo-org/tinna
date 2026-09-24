@@ -27,7 +27,9 @@ describe('付款方式可用性', () => {
 
   it('config 關閉的方式停用；讀不到 config 視為可用', () => {
     expect(payAvailability(cfg(), '2026-10-30', '19:00', NOW).enabled).toEqual({ card: true, atm: true, line: false });
-    expect(payAvailability(null, '2026-10-30', '19:00', NOW).enabled).toEqual({ card: true, atm: true, line: true });
+    // 讀不到 config：信用卡／LINE Pay 視為可用（送出時由 API 判斷），ATM 預設關閉
+    expect(payAvailability(null, '2026-10-30', '19:00', NOW).enabled).toEqual({ card: true, atm: false, line: true });
+    expect(payAvailability(cfg({ payments: { card: true, atm: false, line: false } }), '2026-10-30', '19:00', NOW).enabled.atm).toBe(false);
   });
 
   it('時段距離現在不到 72 小時 → ATM 停用（剛好 72 小時可用）', () => {

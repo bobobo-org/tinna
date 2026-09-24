@@ -96,7 +96,7 @@ describe('LINE Pay 未設定', () => {
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({
       error: 'payment_unavailable',
-      message: 'LINE Pay 即將開放，請改用信用卡或 ATM 轉帳',
+      message: 'LINE Pay 即將開放，請改用信用卡',
     });
   });
 });

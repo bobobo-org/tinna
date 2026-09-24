@@ -25,6 +25,8 @@ export const BASE_ENV: Record<string, string> = {
   ECPAY_HASH_KEY: ECPAY_TEST.hashKey,
   ECPAY_HASH_IV: ECPAY_TEST.hashIv,
   ECPAY_ENV: 'stage',
+  // 正式環境預設關閉 ATM；既有的 ATM 測試照舊開著跑（關閉時的行為見 atm-disabled.test.ts）
+  ATM_ENABLED: 'true',
   ADMIN_EMAIL: 'teacher@example.com',
 };
 

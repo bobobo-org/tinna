@@ -151,6 +151,7 @@ flowchart LR
 | `ECPAY_MERCHANT_ID` | 三個一起設定才會啟用信用卡／ATM | 綠界特店代號 |
 | `ECPAY_HASH_KEY` | 同上 | 綠界 HashKey |
 | `ECPAY_HASH_IV` | 同上 | 綠界 HashIV |
+| `ATM_ENABLED` | 選填（預設關閉） | 設為 `true` 才開放 ATM 轉帳；未設定時網站不顯示 ATM、新預約不接受 ATM（已取號的 ATM 訂單照常處理） |
 | `LINEPAY_ENV` | 選填（預設 `sandbox`） | `sandbox` 或 `prod` |
 | `LINEPAY_CHANNEL_ID` | 兩個一起設定才會啟用 LINE Pay | LINE Pay channel ID |
 | `LINEPAY_CHANNEL_SECRET` | 同上 | LINE Pay channel secret |

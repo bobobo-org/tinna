@@ -82,7 +82,7 @@ describe('POST /bookings：驗證（README §5.5）', () => {
     const h = makeHarness({ now: NOW });
     const res = await postJson(h, '/bookings', { ...valid, pay_method: 'line' });
     expect(res.status).toBe(400);
-    expect((await body(res)).fields.pay_method).toBe('LINE Pay 即將開放，請改用信用卡或 ATM 轉帳');
+    expect((await body(res)).fields.pay_method).toBe('LINE Pay 即將開放，請改用信用卡');
   });
 
   it('綠界未設定 → 信用卡／ATM 不收單', async () => {
