@@ -14,6 +14,8 @@ import {
 } from '../lib/policy';
 import { rateLimitKey } from '../lib/rate-limit';
 import { composeTopicQuestions } from '../lib/topics';
+import { normalizeVipCard } from '../lib/vip';
+import { notifyAdminNewOrder, sendConfirmation } from '../services/notify';
 import { resolveReferral, type ResolvedReferral } from '../services/referral';
 import {
   HOUR_MS,
@@ -30,6 +32,14 @@ const MSG_SLOT_UNAVAILABLE = '這個時段目前無法預約，請重新選擇�
 const MSG_TOO_MANY_PENDING = '您已有尚未完成付款的預約，請先完成付款，或稍後再試';
 const MSG_ATM_LEAD = `ATM 轉帳需於諮詢開始 ${ATM_MIN_LEAD_HOURS} 小時前預約，請改用信用卡`;
 const MSG_ATM_FULL = 'ATM 轉帳名額暫滿，請改用信用卡';
+const MSG_VIP_ONLY = 'VIP 諮詢只能使用 VIP 堂數預約';
+const MSG_VIP_SERVICE = 'VIP 堂數只能預約「VIP 諮詢」';
+const MSG_VIP_CARD = '請輸入正確的 VIP 卡號（例：VIP-AB2C-D3EF）';
+const MSG_VIP_RESULT = {
+  vip_not_found: '找不到這張 VIP 卡，請確認卡號與購買時的 Email',
+  vip_expired: '這張 VIP 卡已超過使用期限',
+  vip_no_sessions: '這張 VIP 卡的堂數已經用完',
+} as const;
 
 export function methodUnavailableMessage(deps: AppDeps, method: PayMethod): string | null {
   if (method === 'line') return deps.linepay ? null : 'LINE Pay 即將開放，請改用信用卡';
@@ -105,17 +115,26 @@ export function bookingRoutes(deps: AppDeps) {
       return apiError(c, 400, 'validation', MSG.questionRequired, { questions: MSG.questionRequired });
     }
 
-    const methodMsg = methodUnavailableMessage(deps, d.pay_method);
-    if (methodMsg) return apiError(c, 400, 'validation', methodMsg, { pay_method: methodMsg });
-
-    // KOL 推薦碼：折扣後的金額一樣由 DB 設定計算
+    // VIP 專用方案只能用 VIP 堂數；VIP 堂數也只能用在 VIP 方案（0007）
+    if (service.vipOnly && d.pay_method !== 'vip') return apiError(c, 400, 'validation', MSG_VIP_ONLY, { pay_method: MSG_VIP_ONLY });
+    if (!service.vipOnly && d.pay_method === 'vip') return apiError(c, 400, 'validation', MSG_VIP_SERVICE, { pay_method: MSG_VIP_SERVICE });
+    let vipCard: string | null = null;
     let amount = service.price;
     let referral: ResolvedReferral | null = null;
-    if (d.referral_code) {
-      const r = await resolveReferral(deps, d.referral_code, 'booking', service.price, now);
-      if (!r.ok) return apiError(c, 400, 'validation', r.message, { referral_code: r.message });
-      referral = r;
-      amount = r.final;
+    if (d.pay_method === 'vip') {
+      vipCard = normalizeVipCard(d.vip_card_no);
+      if (!vipCard) return apiError(c, 400, 'validation', MSG_VIP_CARD, { vip_card_no: MSG_VIP_CARD });
+    } else {
+      const methodMsg = methodUnavailableMessage(deps, d.pay_method);
+      if (methodMsg) return apiError(c, 400, 'validation', methodMsg, { pay_method: methodMsg });
+
+      // KOL 推薦碼：折扣後的金額一樣由 DB 設定計算（VIP 堂數不適用）
+      if (d.referral_code) {
+        const r = await resolveReferral(deps, d.referral_code, 'booking', service.price, now);
+        if (!r.ok) return apiError(c, 400, 'validation', r.message, { referral_code: r.message });
+        referral = r;
+        amount = r.final;
+      }
     }
 
     const startsAt = fromTaipei(d.date, d.time);
@@ -132,12 +151,58 @@ export function bookingRoutes(deps: AppDeps) {
       return apiError(c, 409, 'slot_unavailable', MSG_SLOT_UNAVAILABLE);
     }
 
+    const endsAt = new Date(startsAt.getTime() + service.minutes * MINUTE_MS);
+
+    // VIP：卡號＋Email 對得上、未到期、有堂數 → 直接建立已確認的預約並扣一堂（不需要付款）
+    if (d.pay_method === 'vip') {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const orderNo = generateOrderNo();
+        const r = await deps.db.createVipBooking({
+          orderNo,
+          serviceId: service.id,
+          startsAt,
+          endsAt,
+          cardNo: vipCard!,
+          customerName: d.name,
+          gender: d.gender,
+          birthDate: d.birth_date,
+          birthTime: d.birth_time || null,
+          birthPlace: d.birth_place || null,
+          phone: d.phone,
+          email: d.email,
+          questions: questions || null,
+        });
+        if (r.ok) {
+          deps.logger.info('booking.created', {
+            order: orderNo,
+            service: service.id,
+            starts_at: toTaipeiIso(startsAt),
+            method: 'vip',
+            sessions_left: r.sessionsLeft,
+          });
+          const bookingId = r.id;
+          deps.defer('vip_booking_emails', async () => {
+            await sendConfirmation(deps, bookingId);
+            await notifyAdminNewOrder(deps, bookingId);
+          });
+          return c.json(
+            { bookingId, orderNo, amount: 0, payMethod: 'vip', holdExpiresAt: null, sessionsLeft: r.sessionsLeft },
+            201,
+          );
+        }
+        if (r.reason === 'order_no_taken') continue;
+        if (r.reason === 'slot_taken') return apiError(c, 409, 'slot_taken', MSG_SLOT_TAKEN);
+        const msg = MSG_VIP_RESULT[r.reason];
+        return apiError(c, 400, 'validation', msg, { vip_card_no: msg });
+      }
+      throw new Error('could not allocate order number');
+    }
+
     // C. ATM 只接受 72 小時以後的時段
     if (d.pay_method === 'atm' && startsAt.getTime() < now.getTime() + ATM_MIN_LEAD_HOURS * HOUR_MS) {
       return apiError(c, 400, 'validation', MSG_ATM_LEAD, { pay_method: MSG_ATM_LEAD });
     }
 
-    const endsAt = new Date(startsAt.getTime() + service.minutes * MINUTE_MS);
     const holdExpiresAt = new Date(now.getTime() + HOLD_MS[d.pay_method]);
 
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -168,6 +233,7 @@ export function bookingRoutes(deps: AppDeps) {
               kind: 'booking',
               orderNo,
               bookingId: r.id,
+              orderId: null,
               originalAmount: referral.original,
               discountAmount: referral.discount,
               finalAmount: referral.final,

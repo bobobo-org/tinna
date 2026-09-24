@@ -37,6 +37,8 @@ function recordingClient() {
     apply_atm_issued: { result: 'issued' },
     mark_payment_failed: { result: 'failed' },
     flag_payment_attention: { result: 'flagged' },
+    apply_order_paid: { result: 'paid', order_no: 'YS8K2M4Q7T', kind: 'vip', card_no: 'VIP-AB2C-D3EF' },
+    create_vip_booking: { result: 'created', id: 'x', sessions_left: 3 },
   };
   const client = {
     rpc: async (name: string, params: Record<string, unknown>) => {
@@ -86,10 +88,35 @@ describe('RPC 參數名稱與 SQL 函式簽章一致', () => {
     });
     await db.markPaymentFailed({ provider: 'ecpay', tradeNo: 't', event: 'e', raw: {} });
     await db.flagPaymentAttention({ provider: 'ecpay', tradeNo: 't', event: 'e', raw: {}, reason: 'r' });
+    await db.applyOrderPaid({ tradeNo: 't', amount: 1, providerTxnId: null, raw: {}, cardNo: 'VIP-AB2C-D3EF' });
+    await db.createVipBooking({
+      orderNo: 'YS8K2M4Q7T',
+      serviceId: 'vip',
+      startsAt: now,
+      endsAt: now,
+      cardNo: 'VIP-AB2C-D3EF',
+      customerName: 'x',
+      gender: 'female',
+      birthDate: '1990-01-01',
+      birthTime: null,
+      birthPlace: null,
+      phone: '0912345678',
+      email: 'a@b.co',
+      questions: null,
+    });
 
     const sigs = sqlSignatures();
     expect(calls.map((c) => c.name).sort()).toEqual(
-      ['apply_atm_issued', 'apply_payment_paid', 'create_booking', 'expire_stale_holds', 'flag_payment_attention', 'mark_payment_failed'],
+      [
+        'apply_atm_issued',
+        'apply_order_paid',
+        'apply_payment_paid',
+        'create_booking',
+        'create_vip_booking',
+        'expire_stale_holds',
+        'flag_payment_attention',
+        'mark_payment_failed',
+      ],
     );
     for (const c of calls) {
       const sql = sigs.get(c.name);

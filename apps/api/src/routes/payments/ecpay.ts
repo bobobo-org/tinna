@@ -20,7 +20,24 @@ import { attemptsExceeded, checkPayable, itemName, paymentRateLimited, paymentUn
 //   atm-info     PaymentInfoURL（server）     → 回 1|OK
 //   atm-redirect ClientRedirectURL（瀏覽器）  → 303 完成頁
 
-type Verified = { ok: true; params: EcpayParams } | { ok: false; params: EcpayParams; reason: string };
+export type Verified = { ok: true; params: EcpayParams } | { ok: false; params: EcpayParams; reason: string };
+
+/** 綠界回呼驗簽（預約與 VIP／商店訂單共用） */
+export async function verifyEcpayCallback(deps: AppDeps, c: Context, endpoint: string): Promise<Verified> {
+  const params = parseFormBody(await c.req.text());
+  const cfg = deps.env.ecpay;
+  if (!cfg) return { ok: false, params, reason: 'disabled' };
+  if (!verifyCheckMacValue(params, cfg.hashKey, cfg.hashIv)) {
+    deps.logger.warn('ecpay.bad_signature', { endpoint, trade_no: params.MerchantTradeNo });
+    return { ok: false, params, reason: 'checkmac' };
+  }
+  if (params.MerchantID !== cfg.merchantId) {
+    deps.logger.warn('ecpay.wrong_merchant', { endpoint, trade_no: params.MerchantTradeNo });
+    return { ok: false, params, reason: 'merchant' };
+  }
+  if (!params.MerchantTradeNo) return { ok: false, params, reason: 'trade_no' };
+  return { ok: true, params };
+}
 
 const amountOf = (s: string | undefined): number => (s && /^\d+$/.test(s) ? Number(s) : -1);
 
@@ -48,21 +65,7 @@ export const ECPAY_PENDING_REVIEW = '10300066';
 export function ecpayRoutes(deps: AppDeps) {
   const app = new Hono();
 
-  async function verify(c: Context, endpoint: string): Promise<Verified> {
-    const params = parseFormBody(await c.req.text());
-    const cfg = deps.env.ecpay;
-    if (!cfg) return { ok: false, params, reason: 'disabled' };
-    if (!verifyCheckMacValue(params, cfg.hashKey, cfg.hashIv)) {
-      deps.logger.warn('ecpay.bad_signature', { endpoint, trade_no: params.MerchantTradeNo });
-      return { ok: false, params, reason: 'checkmac' };
-    }
-    if (params.MerchantID !== cfg.merchantId) {
-      deps.logger.warn('ecpay.wrong_merchant', { endpoint, trade_no: params.MerchantTradeNo });
-      return { ok: false, params, reason: 'merchant' };
-    }
-    if (!params.MerchantTradeNo) return { ok: false, params, reason: 'trade_no' };
-    return { ok: true, params };
-  }
+  const verify = (c: Context, endpoint: string) => verifyEcpayCallback(deps, c, endpoint);
 
   /** 付款結果（notify / result 共用）；回傳訂單編號 */
   async function handlePayment(params: EcpayParams, event: 'notify' | 'result'): Promise<string | null> {
@@ -156,6 +159,9 @@ export function ecpayRoutes(deps: AppDeps) {
     if (!b) return apiError(c, 404, 'not_found', '找不到這筆訂單');
     if (b.payMethod === 'line') {
       return apiError(c, 409, 'invalid_method', '這筆訂單選擇 LINE Pay 付款，請改用 LINE Pay');
+    }
+    if (b.payMethod === 'vip') {
+      return apiError(c, 409, 'invalid_method', '這筆預約使用 VIP 堂數，不需要付款');
     }
     const now = deps.now();
     const blocked = checkPayable(b, now);

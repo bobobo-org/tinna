@@ -1,10 +1,14 @@
 import type { AppDeps } from '../deps';
-import type { AtmIssuedResult, PaidResult, Provider } from '../db/types';
+import type { AtmIssuedResult, Order, OrderPaidResult, PaidResult, Provider } from '../db/types';
 import {
   adminAlertEmail,
+  adminNewCommerceOrderEmail,
   adminNewOrderEmail,
   confirmationEmail,
+  shippedEmail,
+  shopOrderEmail,
   transferInfoEmail,
+  vipCardEmail,
 } from '../lib/emails';
 
 // 寄信與付款結果後續處理。只有「第一次」狀態轉換（SQL 函式回 confirmed / issued）才寄信，
@@ -132,3 +136,56 @@ export function afterAtmIssued(deps: Deps, r: AtmIssuedResult, ctx: { tradeNo: s
       return;
   }
 }
+
+// ---------- VIP 包堂、商店（0007） ----------
+
+/** VIP／商店訂單付款成功：寄給顧客（VIP 卡號或訂單確認）與老師 */
+export async function sendOrderPaidEmails(deps: Deps, orderNo: string): Promise<void> {
+  const o = await deps.db.getOrder(orderNo);
+  if (!o || o.status === 'pending_payment') return;
+  if (o.kind === 'vip') {
+    const m = await deps.db.getVipMemberByOrder(o.id);
+    if (!m) return;
+    const plan = o.vipPlanId ? await deps.db.getVipPlan(o.vipPlanId) : null;
+    await deps.mailer.send(vipCardEmail(o, m, plan, deps.env.webUrl));
+    if (deps.env.mail.adminEmails.length > 0) {
+      await deps.mailer.send(
+        adminNewCommerceOrderEmail(o, deps.env.mail.adminEmails, [
+          ['VIP 卡號', m.cardNo],
+          ['方案', plan ? `${plan.name}（${plan.sessions} 堂）` : `${m.sessionsTotal} 堂`],
+        ]),
+      );
+    }
+    return;
+  }
+  if (o.kind === 'shop') {
+    await deps.mailer.send(shopOrderEmail(o));
+    if (deps.env.mail.adminEmails.length > 0) await deps.mailer.send(adminNewCommerceOrderEmail(o, deps.env.mail.adminEmails));
+  }
+}
+
+/** apply_order_paid 結果 → log、寄信、異常通知老師（背景） */
+export function afterOrderPaid(deps: Deps, r: OrderPaidResult, ctx: { tradeNo: string; event: string }): void {
+  const base = { order: r.order_no ?? null, kind: r.kind ?? null, event: ctx.event, trade_no: ctx.tradeNo };
+  if (r.result === 'paid' && r.order_no) {
+    deps.logger.info('order.paid', base);
+    const orderNo = r.order_no;
+    deps.defer('order_paid_emails', () => sendOrderPaidEmails(deps, orderNo));
+    return;
+  }
+  if (r.result === 'already_paid') {
+    deps.logger.info('order.already_paid', base);
+    return;
+  }
+  const reason = r.result === 'duplicate_payment' ? 'duplicate_payment' : r.result === 'amount_mismatch' ? 'amount_mismatch' : 'unknown_trade';
+  deps.logger.warn('order.payment_attention', { ...base, result: r.result });
+  deps.defer('admin_alert', () =>
+    alertAdmin(deps, { orderNo: r.order_no ?? null, reason, detail: `綠界交易編號 ${ctx.tradeNo}（${r.kind ?? '訂單'}）` }),
+  );
+}
+
+/** 出貨通知（後台把商店訂單或贈品標為已出貨時） */
+export async function sendShippedEmail(deps: Deps, o: Order): Promise<void> {
+  await deps.mailer.send(shippedEmail(o));
+}
+

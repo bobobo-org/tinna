@@ -9,7 +9,9 @@ declare
     'public.expire_stale_holds(timestamptz,timestamptz)',
     'public.create_booking(text,text,timestamptz,timestamptz,text,integer,timestamptz,text,text,date,time,text,text,text,text,integer,integer)',
     'public.flag_payment_attention(text,text,text,jsonb,text)',
-    'public.normalize_phone(text)'
+    'public.normalize_phone(text)',
+    'public.apply_order_paid(text,integer,text,jsonb,text)',
+    'public.create_vip_booking(text,text,timestamptz,timestamptz,text,text,text,date,time,text,text,text,text)'
   ];
   f text;
 begin
@@ -29,6 +31,15 @@ begin
   assert not has_table_privilege('authenticated', 'public.date_overrides', 'insert'), 'auth insert overrides';
   assert not has_sequence_privilege('anon', 'public.weekly_slots_id_seq', 'usage'), 'anon seq';
   assert has_table_privilege('service_role', 'public.bookings', 'insert'), 'service insert bookings';
+  -- 0006／0007：推薦碼、訂單、VIP 會員只給 service_role；商品與 VIP 方案 anon 只能讀
+  assert not has_table_privilege('anon', 'public.referral_codes', 'select'), 'anon select referral_codes';
+  assert not has_table_privilege('anon', 'public.orders', 'select'), 'anon select orders';
+  assert not has_table_privilege('anon', 'public.vip_members', 'select'), 'anon select vip_members';
+  assert not has_table_privilege('authenticated', 'public.order_payments', 'select'), 'auth select order_payments';
+  assert not has_table_privilege('anon', 'public.settings', 'select'), 'anon select settings';
+  assert has_table_privilege('anon', 'public.products', 'select'), 'anon select products';
+  assert not has_table_privilege('anon', 'public.products', 'insert'), 'anon insert products';
+  assert has_table_privilege('anon', 'public.vip_plans', 'select'), 'anon select vip_plans';
   raise notice 'PASS privileges';
 end $$;
 
@@ -37,8 +48,8 @@ update public.services set active = false where id = 'quick';
 set role anon;
 do $$
 begin
-  -- seed 4 個 ＋ 0004 的 5 個（接住你的諮詢室、自選主題 4 個價位），quick 停用 → 8
-  assert (select count(*) from public.services) = 8, 'anon sees only active services';
+  -- seed 4 個 ＋ 0004 的 5 個（接住你的諮詢室、自選主題 4 個價位）＋ 0007 的 VIP 諮詢，quick 停用 → 9
+  assert (select count(*) from public.services) = 9, 'anon sees only active services';
   assert not exists (select 1 from public.services where id = 'quick'), 'anon sees inactive service';
   assert (select count(*) from public.weekly_slots) = 30, 'anon sees weekly slots';
   begin

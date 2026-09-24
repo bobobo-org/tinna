@@ -16,6 +16,9 @@ type Deps = Pick<AppDeps, 'db' | 'mailer' | 'env' | 'logger' | 'defer' | 'now' |
 export async function runExpireHolds(deps: Deps): Promise<number> {
   const n = await deps.db.expireStaleHolds();
   if (n > 0) deps.logger.info('job.expired_holds', { count: n });
+  // VIP／商店訂單：保留逾時未付款 → expired（不占時段也不占庫存，只是讓後台看得清楚）
+  const o = await deps.db.expireStaleOrders(deps.now());
+  if (o > 0) deps.logger.info('job.expired_orders', { count: o });
   return n;
 }
 

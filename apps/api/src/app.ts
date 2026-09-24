@@ -10,12 +10,23 @@ import { adminReferralRoutes } from './routes/admin-referrals';
 import { availabilityRoutes } from './routes/availability';
 import { bookingRoutes } from './routes/bookings';
 import { referralRoutes } from './routes/referrals';
+import { orderRoutes } from './routes/orders';
+import { vipRoutes } from './routes/vip';
+import { adminCommerceRoutes } from './routes/admin-commerce';
 import { metaRoutes } from './routes/meta';
 import { ecpayRoutes } from './routes/payments/ecpay';
 import { linepayRoutes } from './routes/payments/linepay';
 
 /** 只接受 application/json、且檢查 Origin 的 POST 端點（瀏覽器由前端呼叫的那些） */
-export const JSON_POST_ENDPOINTS = ['/bookings', '/payments/ecpay/checkout', '/payments/linepay/request'];
+export const JSON_POST_ENDPOINTS = [
+  '/bookings',
+  '/payments/ecpay/checkout',
+  '/payments/linepay/request',
+  '/vip/orders',
+  '/vip/lookup',
+  '/shop/orders',
+  '/payments/ecpay/order-checkout',
+];
 
 export function createApp(deps: AppDeps) {
   const app = new Hono();
@@ -107,6 +118,9 @@ export function createApp(deps: AppDeps) {
   app.route('/', adminRoutes(deps));
   app.route('/', adminReferralRoutes(deps));
   app.route('/', referralRoutes(deps));
+  app.route('/', vipRoutes(deps));
+  app.route('/', orderRoutes(deps));
+  app.route('/', adminCommerceRoutes(deps));
   app.route('/', availabilityRoutes(deps));
   app.route('/', bookingRoutes(deps));
   app.route('/', ecpayRoutes(deps));

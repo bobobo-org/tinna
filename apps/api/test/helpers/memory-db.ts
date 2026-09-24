@@ -5,6 +5,7 @@ import {
   type AtmIssuedResult,
   type BookingFull,
   type BookingLimits,
+  type BookingPayMethod,
   type BookingPublic,
   type BookingStatus,
   type BusyBooking,
@@ -12,17 +13,29 @@ import {
   type DateOverrideRow,
   type Db,
   type EmailKind,
+  type CommerceKind,
   type FailedResult,
   type FlagResult,
   type Kol,
   type KolPatch,
   type NewBooking,
   type NewKol,
+  type NewOrder,
   type NewPayment,
+  type NewVipBooking,
+  type Order,
+  type OrderPaidResult,
+  type OrderPatch,
+  type OrderStatus,
   type NewReferralCode,
   type NewReferralUse,
   type ReferralCodePatch,
   type ReferralUseRow,
+  type VipBookingResult,
+  type VipMember,
+  type VipMemberPatch,
+  type VipPlan,
+  type VipPlanPatch,
   type PaidResult,
   type PaymentRow,
   type PaymentStatus,
@@ -57,7 +70,7 @@ export interface MemBooking {
   startsAt: Date;
   endsAt: Date;
   status: BookingStatus;
-  payMethod: PayMethod;
+  payMethod: BookingPayMethod;
   amount: number;
   customerName: string;
   gender: string | null;
@@ -78,6 +91,7 @@ export interface MemBooking {
   confirmationSentAt: Date | null;
   transferInfoSentAt: Date | null;
   adminNotifiedAt: Date | null;
+  vipMemberId: string | null;
 }
 
 export interface MemPayment {
@@ -95,7 +109,7 @@ export interface MemPayment {
   attentionReason: string | null;
 }
 
-const PLAN = { topicLimit: null, questionRequired: false, active: true };
+const PLAN = { topicLimit: null, questionRequired: false, vipOnly: false, active: true };
 
 export const SEED_SERVICES: (Service & { active: boolean })[] = [
   { ...PLAN, id: 'flow', name: '流年運勢盤', shortName: '流年 · 大限', minutes: 60, price: 2800 },
@@ -108,7 +122,45 @@ export const SEED_SERVICES: (Service & { active: boolean })[] = [
   { ...PLAN, id: 'topics-6', name: '自選主題（5～6 題）', shortName: '自選主題', minutes: 75, price: 2600, topicLimit: 6 },
   { ...PLAN, id: 'topics-8', name: '自選主題（7～8 題）', shortName: '自選主題', minutes: 90, price: 3000, topicLimit: 8 },
   { ...PLAN, id: 'topics-15', name: '自選主題（9～15 題）', shortName: '自選主題', minutes: 120, price: 3600, topicLimit: 15 },
+  // 0007：VIP 用堂數預約的方案
+  { ...PLAN, id: 'vip', name: 'VIP 諮詢（90 分鐘）', shortName: 'VIP 諮詢', minutes: 90, price: 4500, vipOnly: true },
 ];
+
+/** 對齊 0007 的 VIP 方案 */
+export const SEED_VIP_PLANS: VipPlan[] = [
+  { id: 'vip-4', name: 'VIP 4 堂', sessions: 4, price: 18000, validDays: 365, description: '每堂 90 分鐘，共 6 小時', sort: 1, active: true },
+  { id: 'vip-10', name: 'VIP 10 堂', sessions: 10, price: 42000, validDays: 365, description: null, sort: 2, active: true },
+  { id: 'vip-12', name: 'VIP 12 堂', sessions: 12, price: 49200, validDays: 365, description: null, sort: 3, active: true },
+  { id: 'vip-15', name: 'VIP 15 堂', sessions: 15, price: 60000, validDays: 365, description: null, sort: 4, active: true },
+  { id: 'vip-20', name: 'VIP 20 堂', sessions: 20, price: 76000, validDays: 365, description: null, sort: 5, active: true },
+];
+
+export interface MemOrderPayment {
+  id: string;
+  orderId: string;
+  tradeNo: string;
+  amount: number;
+  status: 'init' | 'paid' | 'failed';
+  providerTxnId: string | null;
+  raw: Record<string, unknown>;
+  createdAt: Date;
+  paidAt: Date | null;
+}
+
+/** 商店商品（Phase 4 會用到；apply_order_paid 扣庫存） */
+export interface MemProduct {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  price: number;
+  images: string[];
+  stock: number;
+  forSale: boolean;
+  active: boolean;
+  sort: number;
+  createdAt: Date;
+}
 
 export const SEED_WEEKLY: WeeklySlotRow[] = [0, 2, 3, 4, 5, 6].flatMap((weekday) =>
   ['10:00', '13:30', '15:30', '19:00', '20:30'].map((time) => ({ weekday, time })),
@@ -156,6 +208,7 @@ export class MemoryDb implements Db {
       phone: '0912345678',
       email: 'guest@example.com',
       questions: null,
+      vipMemberId: null,
       atmBankCode: null,
       atmAccount: null,
       atmExpiresAt: null,
@@ -264,13 +317,20 @@ export class MemoryDb implements Db {
     return { ...c, kolName: k?.name ?? '', kolActive: k?.active !== false };
   }
 
-  /** 對齊 supabase.ts referralOrderState：已付款／保留中／已取消 */
+  /** 對齊 supabase.ts referralOrderState：已付款／保留中／已取消（預約看 bookings，VIP／商店看 orders） */
   private referralState(u: NewReferralUse, now: Date): 'paid' | 'pending' | 'cancelled' {
-    const b = u.bookingId ? this.bookings.find((x) => x.id === u.bookingId) : undefined;
-    if (u.kind !== 'booking' || !b) return 'cancelled';
-    if (b.status === 'confirmed') return 'paid';
-    if (b.status === 'awaiting_transfer') return 'pending';
-    if (b.status === 'pending_payment' && b.holdExpiresAt && b.holdExpiresAt > now) return 'pending';
+    if (u.kind === 'booking') {
+      const b = u.bookingId ? this.bookings.find((x) => x.id === u.bookingId) : undefined;
+      if (!b) return 'cancelled';
+      if (b.status === 'confirmed') return 'paid';
+      if (b.status === 'awaiting_transfer') return 'pending';
+      if (b.status === 'pending_payment' && b.holdExpiresAt && b.holdExpiresAt > now) return 'pending';
+      return 'cancelled';
+    }
+    const o = u.orderId ? this.orders.find((x) => x.id === u.orderId) : undefined;
+    if (!o) return 'cancelled';
+    if (o.status === 'paid' || o.status === 'shipped' || o.status === 'completed') return 'paid';
+    if (o.status === 'pending_payment' && o.holdExpiresAt && o.holdExpiresAt > now) return 'pending';
     return 'cancelled';
   }
 
@@ -332,6 +392,244 @@ export class MemoryDb implements Db {
         const c = this.referralCodes.find((x) => x.id === u.codeId);
         return { ...u, code: c?.code ?? '', kolId: c?.kolId ?? '', orderState: this.referralState(u, q.now) };
       });
+  }
+
+  // ---------- VIP 包堂、商店、贈品 ----------
+  vipPlans: VipPlan[] = SEED_VIP_PLANS.map((p) => ({ ...p }));
+  orders: Order[] = [];
+  orderPayments: MemOrderPayment[] = [];
+  vipMembers: Omit<VipMember, 'planName'>[] = [];
+  products: MemProduct[] = [];
+
+  private withPlanName(m: Omit<VipMember, 'planName'>): VipMember {
+    return { ...m, planName: this.vipPlans.find((p) => p.id === m.planId)?.name ?? '' };
+  }
+
+  order(orderNo: string) {
+    return this.orders.find((o) => o.orderNo === orderNo);
+  }
+
+  async listVipPlans(activeOnly: boolean) {
+    return this.vipPlans.filter((p) => !activeOnly || p.active).sort((a, b) => a.sort - b.sort).map((p) => ({ ...p }));
+  }
+
+  async getVipPlan(id: string) {
+    const p = this.vipPlans.find((x) => x.id === id);
+    return p ? { ...p } : null;
+  }
+
+  async createVipPlan(p: VipPlan) {
+    if (this.vipPlans.some((x) => x.id === p.id)) return 'duplicate' as const;
+    this.vipPlans.push({ ...p });
+    return { ...p };
+  }
+
+  async updateVipPlan(id: string, patch: VipPlanPatch) {
+    const p = this.vipPlans.find((x) => x.id === id);
+    if (!p) return null;
+    Object.assign(p, patch);
+    return { ...p };
+  }
+
+  async createOrder(o: NewOrder): Promise<{ ok: true; id: string } | { ok: false; reason: 'order_no_taken' }> {
+    if (this.orders.some((x) => x.orderNo === o.orderNo) || this.bookings.some((b) => b.orderNo === o.orderNo)) {
+      return { ok: false, reason: 'order_no_taken' };
+    }
+    const id = randomUUID();
+    this.orders.push({
+      ...o,
+      items: o.items.map((i) => ({ ...i })),
+      id,
+      trackingNo: null,
+      paidAt: o.status === 'paid' ? this.clock() : null,
+      shippedAt: null,
+      createdAt: this.clock(),
+    });
+    return { ok: true, id };
+  }
+
+  async getOrder(orderNo: string) {
+    const o = this.order(orderNo);
+    return o ? { ...o, items: o.items.map((i) => ({ ...i })) } : null;
+  }
+
+  async listOrders(q: { kinds: CommerceKind[] | null; statuses: OrderStatus[] | null; from: Date; to: Date; limit: number }) {
+    return this.orders
+      .filter(
+        (o) =>
+          o.createdAt >= q.from &&
+          o.createdAt < q.to &&
+          (!q.kinds || q.kinds.includes(o.kind)) &&
+          (!q.statuses || q.statuses.includes(o.status)),
+      )
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, q.limit)
+      .map((o) => ({ ...o, items: o.items.map((i) => ({ ...i })) }));
+  }
+
+  async updateOrder(orderNo: string, patch: OrderPatch) {
+    const o = this.order(orderNo);
+    if (!o) return null;
+    Object.assign(o, patch);
+    return { ...o, items: o.items.map((i) => ({ ...i })) };
+  }
+
+  async expireStaleOrders(now: Date) {
+    let n = 0;
+    for (const o of this.orders) {
+      if (o.status === 'pending_payment' && o.holdExpiresAt && o.holdExpiresAt < now) {
+        o.status = 'expired';
+        n++;
+      }
+    }
+    return n;
+  }
+
+  async insertOrderPayment(p: { orderId: string; tradeNo: string; amount: number; raw: Record<string, unknown> }) {
+    this.orderPayments.push({ ...p, id: randomUUID(), status: 'init', providerTxnId: null, createdAt: this.clock(), paidAt: null });
+  }
+
+  async countOrderPayments(orderId: string) {
+    return this.orderPayments.filter((p) => p.orderId === orderId).length;
+  }
+
+  /** 對齊 0007 apply_order_paid */
+  async applyOrderPaid(args: { tradeNo: string; amount: number; providerTxnId: string | null; raw: Record<string, unknown>; cardNo: string }): Promise<OrderPaidResult> {
+    const pay = this.orderPayments.find((p) => p.tradeNo === args.tradeNo);
+    if (!pay) return { result: 'not_found' };
+    const o = this.orders.find((x) => x.id === pay.orderId)!;
+    if (pay.status === 'paid') return { result: 'already_paid', order_no: o.orderNo, kind: o.kind };
+    if (args.amount !== pay.amount || pay.amount !== o.amount) {
+      pay.raw = { ...pay.raw, amount_mismatch: args.raw };
+      return { result: 'amount_mismatch', order_no: o.orderNo, kind: o.kind };
+    }
+    pay.status = 'paid';
+    pay.providerTxnId = args.providerTxnId;
+    pay.paidAt = this.clock();
+    pay.raw = { ...pay.raw, paid: args.raw };
+    if (!['pending_payment', 'expired', 'cancelled'].includes(o.status)) {
+      return { result: 'duplicate_payment', order_no: o.orderNo, kind: o.kind };
+    }
+    o.status = 'paid';
+    o.paidAt = this.clock();
+    o.holdExpiresAt = null;
+    let cardNo: string | null = null;
+    if (o.kind === 'vip') {
+      const plan = this.vipPlans.find((p) => p.id === o.vipPlanId)!;
+      if (this.vipMembers.some((m) => m.cardNo === args.cardNo)) throw new Error('duplicate card_no');
+      const m = {
+        id: randomUUID(),
+        cardNo: args.cardNo,
+        name: o.customerName,
+        email: o.email,
+        phone: o.phone,
+        birthDate: o.birthDate,
+        planId: plan.id,
+        sessionsTotal: plan.sessions,
+        sessionsUsed: 0,
+        expiresAt: new Date(this.clock().getTime() + plan.validDays * 86_400_000),
+        orderId: o.id,
+        note: null,
+        createdAt: this.clock(),
+      };
+      this.vipMembers.push(m);
+      o.vipMemberId = m.id;
+      cardNo = m.cardNo;
+    } else if (o.kind === 'shop') {
+      for (const i of o.items) {
+        const p = this.products.find((x) => x.id === i.productId);
+        if (p) p.stock = Math.max(0, p.stock - i.qty);
+      }
+    }
+    return { result: 'paid', order_no: o.orderNo, kind: o.kind, card_no: cardNo };
+  }
+
+  async markOrderPaymentFailed(tradeNo: string, raw: Record<string, unknown>) {
+    const p = this.orderPayments.find((x) => x.tradeNo === tradeNo && x.status === 'init');
+    if (!p) return;
+    p.status = 'failed';
+    p.raw = { ...p.raw, failed: raw };
+  }
+
+  async getVipMemberByCard(cardNo: string) {
+    const m = this.vipMembers.find((x) => x.cardNo === cardNo);
+    return m ? this.withPlanName(m) : null;
+  }
+
+  async getVipMemberByOrder(orderId: string) {
+    const m = this.vipMembers.find((x) => x.orderId === orderId);
+    return m ? this.withPlanName(m) : null;
+  }
+
+  async getVipMember(id: string) {
+    const m = this.vipMembers.find((x) => x.id === id);
+    return m ? this.withPlanName(m) : null;
+  }
+
+  async listVipMembers(q: { search: string | null; birthMonth: number | null; limit: number }) {
+    const s = (q.search ?? '').trim().toLowerCase();
+    return this.vipMembers
+      .filter((m) => !s || [m.name, m.email, m.cardNo, m.phone].some((v) => v.toLowerCase().includes(s)))
+      .filter((m) => !q.birthMonth || (!!m.birthDate && Number(m.birthDate.slice(5, 7)) === q.birthMonth))
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, q.limit)
+      .map((m) => this.withPlanName(m));
+  }
+
+  async updateVipMember(id: string, patch: VipMemberPatch) {
+    const m = this.vipMembers.find((x) => x.id === id);
+    if (!m) return null;
+    Object.assign(m, patch);
+    return this.withPlanName(m);
+  }
+
+  async listVipBookings(memberId: string) {
+    return this.bookings
+      .filter((b) => b.vipMemberId === memberId)
+      .sort((a, b) => b.startsAt.getTime() - a.startsAt.getTime())
+      .map((b) => ({
+        orderNo: b.orderNo,
+        startsAt: b.startsAt,
+        status: b.status,
+        serviceName: this.services.find((x) => x.id === b.serviceId)?.name ?? '',
+      }));
+  }
+
+  /** 對齊 0007 create_vip_booking */
+  async createVipBooking(nb: NewVipBooking): Promise<VipBookingResult> {
+    this.calls.push('createVipBooking');
+    await this.expireStaleHolds({ from: nb.startsAt, to: nb.endsAt });
+    const m = this.vipMembers.find((x) => x.cardNo === nb.cardNo.trim().toUpperCase());
+    if (!m || m.email.trim().toLowerCase() !== nb.email.trim().toLowerCase()) return { ok: false, reason: 'vip_not_found' };
+    if (m.expiresAt <= this.clock()) return { ok: false, reason: 'vip_expired' };
+    if (m.sessionsUsed >= m.sessionsTotal) return { ok: false, reason: 'vip_no_sessions' };
+    const plan = this.vipPlans.find((p) => p.id === m.planId);
+    const amount = plan ? Math.max(1, Math.round(plan.price / plan.sessions)) : 1;
+    this.beforeInsert?.({ ...nb, payMethod: 'card', amount, holdExpiresAt: nb.startsAt });
+    if (this.slotConflict(nb.startsAt, nb.endsAt)) return { ok: false, reason: 'slot_taken' };
+    if (this.bookings.some((b) => b.orderNo === nb.orderNo)) return { ok: false, reason: 'order_no_taken' };
+    const b = this.addBooking({
+      orderNo: nb.orderNo,
+      serviceId: nb.serviceId,
+      startsAt: nb.startsAt,
+      endsAt: nb.endsAt,
+      status: 'confirmed',
+      payMethod: 'vip',
+      amount,
+      holdExpiresAt: null,
+      confirmedAt: this.clock(),
+      customerName: nb.customerName,
+      gender: nb.gender,
+      birthDate: nb.birthDate,
+      birthTime: nb.birthTime,
+      birthPlace: nb.birthPlace,
+      phone: nb.phone,
+      email: nb.email,
+      questions: nb.questions,
+      vipMemberId: m.id,
+    });
+    m.sessionsUsed += 1;
+    return { ok: true, id: b.id, sessionsLeft: m.sessionsTotal - m.sessionsUsed };
   }
 
   // ---------- Db ----------

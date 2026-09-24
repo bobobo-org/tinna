@@ -49,13 +49,18 @@ export interface CheckoutInput {
   tradeDate: Date;
   apiUrl: string;
   webUrl: string;
+  /**
+   * VIP／商店訂單用（0007）：付款結果回呼與完成頁改用這組網址；只支援信用卡
+   * 沒給時為預約的 /payments/ecpay/notify、/payments/ecpay/result、/booking/success
+   */
+  urls?: { returnPath: string; resultPath: string; clientBackUrl: string };
 }
 
 export const ECPAY_TRADE_DESC = '緣舍命理線上諮詢';
 
 /** 產生前端要 POST 到綠界的全部欄位（含 CheckMacValue） */
 export function buildCheckoutFields(cfg: EcpayConfig, input: CheckoutInput): EcpayParams {
-  const successUrl = `${input.webUrl}/booking/success?order=${input.orderNo}`;
+  const successUrl = input.urls?.clientBackUrl ?? `${input.webUrl}/booking/success?order=${input.orderNo}`;
   const fields: EcpayParams = {
     MerchantID: cfg.merchantId,
     MerchantTradeNo: input.tradeNo,
@@ -64,7 +69,7 @@ export function buildCheckoutFields(cfg: EcpayConfig, input: CheckoutInput): Ecp
     TotalAmount: String(input.amount),
     TradeDesc: ECPAY_TRADE_DESC,
     ItemName: sanitizeItemName(input.itemName),
-    ReturnURL: `${input.apiUrl}/payments/ecpay/notify`,
+    ReturnURL: `${input.apiUrl}${input.urls?.returnPath ?? '/payments/ecpay/notify'}`,
     ChoosePayment: input.method === 'card' ? 'Credit' : 'ATM',
     EncryptType: '1',
     ClientBackURL: successUrl,
@@ -72,7 +77,7 @@ export function buildCheckoutFields(cfg: EcpayConfig, input: CheckoutInput): Ecp
   };
   if (input.method === 'card') {
     // 付款完成後瀏覽器 POST 回 API，驗簽後 303 到完成頁（ATM 不支援此參數）
-    fields.OrderResultURL = `${input.apiUrl}/payments/ecpay/result`;
+    fields.OrderResultURL = `${input.apiUrl}${input.urls?.resultPath ?? '/payments/ecpay/result'}`;
   } else {
     fields.ExpireDate = '1'; // 繳費期限天數：隔天 23:59 截止
     fields.PaymentInfoURL = `${input.apiUrl}/payments/ecpay/atm-info`;

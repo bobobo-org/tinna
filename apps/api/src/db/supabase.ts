@@ -17,9 +17,16 @@ import {
   type EmailKind,
   type FailedResult,
   type FlagResult,
+  type CommerceKind,
   type Kol,
   type KolPatch,
   type NewBooking,
+  type NewOrder,
+  type NewVipBooking,
+  type Order,
+  type OrderPaidResult,
+  type OrderPatch,
+  type OrderStatus,
   type NewKol,
   type NewPayment,
   type NewReferralCode,
@@ -30,6 +37,11 @@ import {
   type ReferralCodePatch,
   type ReferralUseRow,
   type Service,
+  type VipBookingResult,
+  type VipMember,
+  type VipMemberPatch,
+  type VipPlan,
+  type VipPlanPatch,
   type WeeklySlotRow,
 } from './types';
 
@@ -63,7 +75,7 @@ const PUBLIC_COLUMNS =
 const PAYMENT_COLUMNS =
   'id,booking_id,provider,method,provider_trade_no,provider_txn_id,amount,status,created_at,attention_reason,payment_url:raw->request->>paymentUrl';
 
-const SERVICE_COLUMNS = 'id,name,short_name,minutes,price,topic_limit,question_required';
+const SERVICE_COLUMNS = 'id,name,short_name,minutes,price,topic_limit,question_required,vip_only';
 
 // 未產生 Supabase 型別檔；欄位在 map* 函式集中轉換
 type Row = any;
@@ -77,6 +89,7 @@ function toService(r: Row): Service {
     price: r.price,
     topicLimit: r.topic_limit ?? null,
     questionRequired: r.question_required === true,
+    vipOnly: r.vip_only === true,
   };
 }
 
@@ -132,13 +145,112 @@ function mapKol(r: Row): Kol {
   };
 }
 
-/** 推薦碼使用紀錄對應的訂單狀態：已付款／保留中／已取消（取消、逾時、退款、保留過期） */
-function referralOrderState(kind: string, booking: Row | null, now: Date): 'paid' | 'pending' | 'cancelled' {
-  if (kind !== 'booking' || !booking) return 'cancelled';
-  if (booking.status === 'confirmed') return 'paid';
-  if (booking.status === 'awaiting_transfer') return 'pending';
-  if (booking.status === 'pending_payment' && booking.hold_expires_at && new Date(booking.hold_expires_at) > now) return 'pending';
+/**
+ * 推薦碼使用紀錄對應的訂單狀態：已付款／保留中／已取消（取消、逾時、退款、保留過期）
+ * 預約看 bookings，VIP／商店看 orders（0007）
+ */
+function referralOrderState(kind: string, booking: Row | null, order: Row | null, now: Date): 'paid' | 'pending' | 'cancelled' {
+  const holdAlive = (r: Row) => !!r.hold_expires_at && new Date(r.hold_expires_at) > now;
+  if (kind === 'booking') {
+    if (!booking) return 'cancelled';
+    if (booking.status === 'confirmed') return 'paid';
+    if (booking.status === 'awaiting_transfer') return 'pending';
+    if (booking.status === 'pending_payment' && holdAlive(booking)) return 'pending';
+    return 'cancelled';
+  }
+  if (!order) return 'cancelled';
+  if (order.status === 'paid' || order.status === 'shipped' || order.status === 'completed') return 'paid';
+  if (order.status === 'pending_payment' && holdAlive(order)) return 'pending';
   return 'cancelled';
+}
+
+function mapVipPlan(r: Row): VipPlan {
+  return {
+    id: r.id,
+    name: r.name,
+    sessions: r.sessions,
+    price: r.price,
+    validDays: r.valid_days,
+    description: r.description ?? null,
+    sort: r.sort ?? 0,
+    active: !!r.active,
+  };
+}
+
+function vipPlanRow(p: Partial<VipPlan>): Row {
+  const row: Row = {};
+  if (p.id !== undefined) row.id = p.id;
+  if (p.name !== undefined) row.name = p.name;
+  if (p.sessions !== undefined) row.sessions = p.sessions;
+  if (p.price !== undefined) row.price = p.price;
+  if (p.validDays !== undefined) row.valid_days = p.validDays;
+  if (p.description !== undefined) row.description = p.description;
+  if (p.sort !== undefined) row.sort = p.sort;
+  if (p.active !== undefined) row.active = p.active;
+  return row;
+}
+
+const VIP_MEMBER_COLUMNS =
+  'id,card_no,name,email,phone,birth_date,plan_id,sessions_total,sessions_used,expires_at,order_id,note,created_at,plan:vip_plans(name)';
+
+function mapVipMember(r: Row): VipMember {
+  return {
+    id: r.id,
+    cardNo: r.card_no,
+    name: r.name,
+    email: r.email,
+    phone: r.phone,
+    birthDate: r.birth_date ?? null,
+    planId: r.plan_id ?? null,
+    planName: r.plan?.name ?? '',
+    sessionsTotal: r.sessions_total,
+    sessionsUsed: r.sessions_used,
+    expiresAt: new Date(r.expires_at),
+    orderId: r.order_id ?? null,
+    note: r.note ?? null,
+    createdAt: new Date(r.created_at),
+  };
+}
+
+const ORDER_COLUMNS = '*,items:order_items(product_id,name,unit_price,qty)';
+
+function mapOrder(r: Row): Order {
+  return {
+    id: r.id,
+    orderNo: r.order_no,
+    kind: r.kind,
+    status: r.status,
+    subtotal: r.subtotal,
+    shippingFee: r.shipping_fee,
+    discountAmount: r.discount_amount,
+    amount: r.amount,
+    customerName: r.customer_name,
+    email: r.email,
+    phone: r.phone,
+    birthDate: r.birth_date ?? null,
+    shipName: r.ship_name ?? null,
+    shipPhone: r.ship_phone ?? null,
+    shipAddress: r.ship_address ?? null,
+    note: r.note ?? null,
+    vipPlanId: r.vip_plan_id ?? null,
+    vipMemberId: r.vip_member_id ?? null,
+    holdExpiresAt: toDate(r.hold_expires_at),
+    trackingNo: r.tracking_no ?? null,
+    paidAt: toDate(r.paid_at),
+    shippedAt: toDate(r.shipped_at),
+    createdAt: new Date(r.created_at),
+    items: (r.items ?? []).map((i: Row) => ({
+      productId: i.product_id ?? null,
+      name: i.name,
+      unitPrice: i.unit_price,
+      qty: i.qty,
+    })),
+  };
+}
+
+/** 後台搜尋字串只留安全字元（PostgREST or 篩選語法用到逗號與括號） */
+function safeSearch(s: string): string {
+  return s.replace(/[^\p{L}\p{N}@._+-]/gu, '').slice(0, 60);
 }
 
 const ADMIN_BOOKING_COLUMNS =
@@ -450,10 +562,10 @@ export class SupabaseDb implements Db {
   async countLiveReferralUses(codeId: string, now: Date): Promise<number> {
     const { data, error } = await this.sb
       .from('referral_uses')
-      .select('id,order_kind,booking:bookings(status,hold_expires_at)')
+      .select('id,order_kind,booking:bookings(status,hold_expires_at),order:orders(status,hold_expires_at)')
       .eq('code_id', codeId);
     if (error) fail('countLiveReferralUses', error);
-    return (data ?? []).filter((r: Row) => referralOrderState(r.order_kind, r.booking, now) !== 'cancelled').length;
+    return (data ?? []).filter((r: Row) => referralOrderState(r.order_kind, r.booking, r.order, now) !== 'cancelled').length;
   }
 
   async recordReferralUse(u: NewReferralUse): Promise<void> {
@@ -462,6 +574,7 @@ export class SupabaseDb implements Db {
       order_kind: u.kind,
       order_no: u.orderNo,
       booking_id: u.bookingId,
+      order_id: u.orderId,
       original_amount: u.originalAmount,
       discount_amount: u.discountAmount,
       final_amount: u.finalAmount,
@@ -518,7 +631,7 @@ export class SupabaseDb implements Db {
     const { data, error } = await this.sb
       .from('referral_uses')
       .select(
-        'id,code_id,order_kind,order_no,booking_id,original_amount,discount_amount,final_amount,commission_amount,created_at,code:referral_codes(code,kol_id),booking:bookings(status,hold_expires_at)',
+        'id,code_id,order_kind,order_no,booking_id,order_id,original_amount,discount_amount,final_amount,commission_amount,created_at,code:referral_codes(code,kol_id),booking:bookings(status,hold_expires_at),order:orders(status,hold_expires_at)',
       )
       .gte('created_at', q.from.toISOString())
       .lt('created_at', q.to.toISOString())
@@ -533,13 +646,261 @@ export class SupabaseDb implements Db {
       kind: r.order_kind,
       orderNo: r.order_no,
       bookingId: r.booking_id ?? null,
+      orderId: r.order_id ?? null,
       originalAmount: r.original_amount,
       discountAmount: r.discount_amount,
       finalAmount: r.final_amount,
       commissionAmount: r.commission_amount,
       createdAt: new Date(r.created_at),
-      orderState: referralOrderState(r.order_kind, r.booking, q.now),
+      orderState: referralOrderState(r.order_kind, r.booking, r.order, q.now),
     }));
+  }
+
+  // ---------- VIP 包堂、商店、贈品 ----------
+
+  async listVipPlans(activeOnly: boolean): Promise<VipPlan[]> {
+    let q = this.sb.from('vip_plans').select('*').order('sort', { ascending: true });
+    if (activeOnly) q = q.eq('active', true);
+    const { data, error } = await q;
+    if (error) fail('listVipPlans', error);
+    return (data ?? []).map(mapVipPlan);
+  }
+
+  async getVipPlan(id: string): Promise<VipPlan | null> {
+    const { data, error } = await this.sb.from('vip_plans').select('*').eq('id', id).maybeSingle();
+    if (error) fail('getVipPlan', error);
+    return data ? mapVipPlan(data) : null;
+  }
+
+  async createVipPlan(p: VipPlan): Promise<VipPlan | 'duplicate'> {
+    const { data, error } = await this.sb.from('vip_plans').insert(vipPlanRow(p)).select('*').single();
+    if (error?.code === '23505') return 'duplicate';
+    if (error) fail('createVipPlan', error);
+    return mapVipPlan(data);
+  }
+
+  async updateVipPlan(id: string, patch: VipPlanPatch): Promise<VipPlan | null> {
+    const { data, error } = await this.sb.from('vip_plans').update(vipPlanRow(patch)).eq('id', id).select('*').maybeSingle();
+    if (error) fail('updateVipPlan', error);
+    return data ? mapVipPlan(data) : null;
+  }
+
+  async createOrder(o: NewOrder): Promise<{ ok: true; id: string } | { ok: false; reason: 'order_no_taken' }> {
+    const { data, error } = await this.sb
+      .from('orders')
+      .insert({
+        order_no: o.orderNo,
+        kind: o.kind,
+        status: o.status,
+        subtotal: o.subtotal,
+        shipping_fee: o.shippingFee,
+        discount_amount: o.discountAmount,
+        amount: o.amount,
+        customer_name: o.customerName,
+        email: o.email,
+        phone: o.phone,
+        birth_date: o.birthDate,
+        ship_name: o.shipName,
+        ship_phone: o.shipPhone,
+        ship_address: o.shipAddress,
+        note: o.note,
+        vip_plan_id: o.vipPlanId,
+        vip_member_id: o.vipMemberId,
+        hold_expires_at: o.holdExpiresAt ? o.holdExpiresAt.toISOString() : null,
+        paid_at: o.status === 'paid' ? new Date().toISOString() : null,
+      })
+      .select('id')
+      .single();
+    if (error?.code === '23505') return { ok: false, reason: 'order_no_taken' };
+    if (error) fail('createOrder', error);
+    if (o.items.length > 0) {
+      const { error: itemsError } = await this.sb.from('order_items').insert(
+        o.items.map((i) => ({ order_id: data.id, product_id: i.productId, name: i.name, unit_price: i.unitPrice, qty: i.qty })),
+      );
+      if (itemsError) {
+        // 品項寫不進去就把訂單刪掉，不留下沒有品項的訂單
+        await this.sb.from('orders').delete().eq('id', data.id);
+        fail('createOrder.items', itemsError);
+      }
+    }
+    return { ok: true, id: data.id };
+  }
+
+  async getOrder(orderNo: string): Promise<Order | null> {
+    const { data, error } = await this.sb.from('orders').select(ORDER_COLUMNS).eq('order_no', orderNo).maybeSingle();
+    if (error) fail('getOrder', error);
+    return data ? mapOrder(data) : null;
+  }
+
+  async listOrders(q: { kinds: CommerceKind[] | null; statuses: OrderStatus[] | null; from: Date; to: Date; limit: number }): Promise<Order[]> {
+    let query = this.sb
+      .from('orders')
+      .select(ORDER_COLUMNS)
+      .gte('created_at', q.from.toISOString())
+      .lt('created_at', q.to.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(q.limit);
+    if (q.kinds) query = query.in('kind', q.kinds);
+    if (q.statuses) query = query.in('status', q.statuses);
+    const { data, error } = await query;
+    if (error) fail('listOrders', error);
+    return (data ?? []).map(mapOrder);
+  }
+
+  async updateOrder(orderNo: string, patch: OrderPatch): Promise<Order | null> {
+    const row: Row = {};
+    if (patch.status !== undefined) row.status = patch.status;
+    if (patch.trackingNo !== undefined) row.tracking_no = patch.trackingNo;
+    if (patch.shippedAt !== undefined) row.shipped_at = patch.shippedAt ? patch.shippedAt.toISOString() : null;
+    if (patch.note !== undefined) row.note = patch.note;
+    const { data, error } = await this.sb.from('orders').update(row).eq('order_no', orderNo).select(ORDER_COLUMNS).maybeSingle();
+    if (error) fail('updateOrder', error);
+    return data ? mapOrder(data) : null;
+  }
+
+  async expireStaleOrders(now: Date): Promise<number> {
+    const { data, error } = await this.sb
+      .from('orders')
+      .update({ status: 'expired' })
+      .eq('status', 'pending_payment')
+      .lt('hold_expires_at', now.toISOString())
+      .select('id');
+    if (error) fail('expireStaleOrders', error);
+    return (data ?? []).length;
+  }
+
+  async insertOrderPayment(p: { orderId: string; tradeNo: string; amount: number; raw: Record<string, unknown> }): Promise<void> {
+    const { error } = await this.sb
+      .from('order_payments')
+      .insert({ order_id: p.orderId, trade_no: p.tradeNo, amount: p.amount, raw: p.raw });
+    if (error) fail('insertOrderPayment', error);
+  }
+
+  async countOrderPayments(orderId: string): Promise<number> {
+    const { count, error } = await this.sb.from('order_payments').select('id', { count: 'exact', head: true }).eq('order_id', orderId);
+    if (error) fail('countOrderPayments', error);
+    return count ?? 0;
+  }
+
+  async applyOrderPaid(args: {
+    tradeNo: string;
+    amount: number;
+    providerTxnId: string | null;
+    raw: Record<string, unknown>;
+    cardNo: string;
+  }): Promise<OrderPaidResult> {
+    const { data, error } = await this.sb.rpc('apply_order_paid', {
+      p_trade_no: args.tradeNo,
+      p_amount: args.amount,
+      p_txn: args.providerTxnId,
+      p_raw: args.raw,
+      p_card_no: args.cardNo,
+    });
+    if (error) fail('applyOrderPaid', error);
+    return data as OrderPaidResult;
+  }
+
+  async markOrderPaymentFailed(tradeNo: string, raw: Record<string, unknown>): Promise<void> {
+    const { data: cur, error: readError } = await this.sb.from('order_payments').select('raw').eq('trade_no', tradeNo).maybeSingle();
+    if (readError) fail('markOrderPaymentFailed.read', readError);
+    if (!cur) return;
+    const { error } = await this.sb
+      .from('order_payments')
+      .update({ status: 'failed', raw: { ...(cur.raw ?? {}), failed: raw } })
+      .eq('trade_no', tradeNo)
+      .eq('status', 'init');
+    if (error) fail('markOrderPaymentFailed', error);
+  }
+
+  async getVipMemberByCard(cardNo: string): Promise<VipMember | null> {
+    const { data, error } = await this.sb.from('vip_members').select(VIP_MEMBER_COLUMNS).eq('card_no', cardNo).maybeSingle();
+    if (error) fail('getVipMemberByCard', error);
+    return data ? mapVipMember(data) : null;
+  }
+
+  async getVipMemberByOrder(orderId: string): Promise<VipMember | null> {
+    const { data, error } = await this.sb.from('vip_members').select(VIP_MEMBER_COLUMNS).eq('order_id', orderId).maybeSingle();
+    if (error) fail('getVipMemberByOrder', error);
+    return data ? mapVipMember(data) : null;
+  }
+
+  async getVipMember(id: string): Promise<VipMember | null> {
+    const { data, error } = await this.sb.from('vip_members').select(VIP_MEMBER_COLUMNS).eq('id', id).maybeSingle();
+    if (error) fail('getVipMember', error);
+    return data ? mapVipMember(data) : null;
+  }
+
+  async listVipMembers(q: { search: string | null; birthMonth: number | null; limit: number }): Promise<VipMember[]> {
+    let query = this.sb
+      .from('vip_members')
+      .select(VIP_MEMBER_COLUMNS)
+      .order('created_at', { ascending: false })
+      .limit(q.birthMonth ? 1000 : q.limit);
+    const s = q.search ? safeSearch(q.search) : '';
+    if (s) query = query.or(`name.ilike.*${s}*,email.ilike.*${s}*,card_no.ilike.*${s}*,phone.ilike.*${s}*`);
+    const { data, error } = await query;
+    if (error) fail('listVipMembers', error);
+    let rows = (data ?? []).map(mapVipMember);
+    if (q.birthMonth) rows = rows.filter((m: VipMember) => m.birthDate && Number(m.birthDate.slice(5, 7)) === q.birthMonth);
+    return rows.slice(0, q.limit);
+  }
+
+  async updateVipMember(id: string, patch: VipMemberPatch): Promise<VipMember | null> {
+    const row: Row = {};
+    if (patch.sessionsTotal !== undefined) row.sessions_total = patch.sessionsTotal;
+    if (patch.sessionsUsed !== undefined) row.sessions_used = patch.sessionsUsed;
+    if (patch.expiresAt !== undefined) row.expires_at = patch.expiresAt.toISOString();
+    if (patch.note !== undefined) row.note = patch.note;
+    const { data, error } = await this.sb.from('vip_members').update(row).eq('id', id).select(VIP_MEMBER_COLUMNS).maybeSingle();
+    if (error) fail('updateVipMember', error);
+    return data ? mapVipMember(data) : null;
+  }
+
+  async listVipBookings(memberId: string): Promise<{ orderNo: string; startsAt: Date; status: BookingStatus; serviceName: string }[]> {
+    const { data, error } = await this.sb
+      .from('bookings')
+      .select('order_no,starts_at,status,service:services(name)')
+      .eq('vip_member_id', memberId)
+      .order('starts_at', { ascending: false })
+      .limit(100);
+    if (error) fail('listVipBookings', error);
+    return (data ?? []).map((r: Row) => ({
+      orderNo: r.order_no,
+      startsAt: new Date(r.starts_at),
+      status: r.status,
+      serviceName: r.service?.name ?? '',
+    }));
+  }
+
+  async createVipBooking(b: NewVipBooking): Promise<VipBookingResult> {
+    const { data, error } = await this.sb.rpc('create_vip_booking', {
+      p_order_no: b.orderNo,
+      p_service_id: b.serviceId,
+      p_starts_at: b.startsAt.toISOString(),
+      p_ends_at: b.endsAt.toISOString(),
+      p_card_no: b.cardNo,
+      p_customer_name: b.customerName,
+      p_gender: b.gender,
+      p_birth_date: b.birthDate,
+      p_birth_time: b.birthTime,
+      p_birth_place: b.birthPlace,
+      p_phone: b.phone,
+      p_email: b.email,
+      p_questions: b.questions,
+    });
+    if (error) fail('createVipBooking', error);
+    const r = (data ?? {}) as { result?: string; id?: string; sessions_left?: number };
+    if (r.result === 'created' && r.id) return { ok: true, id: r.id, sessionsLeft: r.sessions_left ?? 0 };
+    if (
+      r.result === 'vip_not_found' ||
+      r.result === 'vip_expired' ||
+      r.result === 'vip_no_sessions' ||
+      r.result === 'slot_taken' ||
+      r.result === 'order_no_taken'
+    ) {
+      return { ok: false, reason: r.result };
+    }
+    throw new DbError('createVipBooking', undefined, `unexpected result ${String(r.result)}`);
   }
 
   async insertPayment(p: NewPayment): Promise<PaymentRow> {

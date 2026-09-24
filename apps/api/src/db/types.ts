@@ -10,6 +10,8 @@ export type BookingStatus =
   | 'expired'
   | 'refunded';
 export type PayMethod = 'card' | 'line' | 'atm';
+/** 預約的付款方式：線上付款三種＋VIP 堂數（0007） */
+export type BookingPayMethod = PayMethod | 'vip';
 export type Provider = 'ecpay' | 'linepay';
 export type PaymentStatus = 'init' | 'paid' | 'failed' | 'refunded';
 
@@ -25,6 +27,8 @@ export interface Service {
   topicLimit: number | null;
   /** 預約時「想問的問題」必填（接住你的諮詢室） */
   questionRequired: boolean;
+  /** VIP 專用方案：只能用 VIP 堂數預約（0007） */
+  vipOnly: boolean;
 }
 
 export interface WeeklySlotRow {
@@ -69,7 +73,7 @@ export interface BookingPublic {
   id: string;
   orderNo: string;
   status: BookingStatus;
-  payMethod: PayMethod;
+  payMethod: BookingPayMethod;
   amount: number;
   startsAt: Date;
   endsAt: Date;
@@ -85,7 +89,7 @@ export interface BookingPublic {
 export interface AdminBooking {
   orderNo: string;
   status: BookingStatus;
-  payMethod: PayMethod;
+  payMethod: BookingPayMethod;
   amount: number;
   startsAt: Date;
   endsAt: Date;
@@ -143,6 +147,8 @@ export interface NewReferralUse {
   kind: OrderKind;
   orderNo: string;
   bookingId: string | null;
+  /** VIP／商店訂單（0007） */
+  orderId: string | null;
   originalAmount: number;
   discountAmount: number;
   finalAmount: number;
@@ -157,6 +163,112 @@ export interface ReferralUseRow extends NewReferralUse {
   createdAt: Date;
   orderState: 'paid' | 'pending' | 'cancelled';
 }
+
+// ---------- VIP 包堂、商店、贈品（0007） ----------
+
+export interface VipPlan {
+  id: string;
+  name: string;
+  sessions: number;
+  price: number;
+  validDays: number;
+  description: string | null;
+  sort: number;
+  active: boolean;
+}
+
+export type VipPlanPatch = Partial<Omit<VipPlan, 'id'>>;
+
+export interface VipMember {
+  id: string;
+  cardNo: string;
+  name: string;
+  email: string;
+  phone: string;
+  birthDate: string | null;
+  planId: string | null;
+  planName: string;
+  sessionsTotal: number;
+  sessionsUsed: number;
+  expiresAt: Date;
+  orderId: string | null;
+  note: string | null;
+  createdAt: Date;
+}
+
+export type VipMemberPatch = Partial<Pick<VipMember, 'sessionsTotal' | 'sessionsUsed' | 'expiresAt' | 'note'>>;
+
+/** orders.kind：VIP 購買、商店、後台寄出的贈品 */
+export type CommerceKind = 'vip' | 'shop' | 'gift';
+export type OrderStatus = 'pending_payment' | 'paid' | 'shipped' | 'completed' | 'cancelled' | 'expired';
+
+export interface OrderItem {
+  productId: string | null;
+  name: string;
+  unitPrice: number;
+  qty: number;
+}
+
+export interface NewOrder {
+  orderNo: string;
+  kind: CommerceKind;
+  status: OrderStatus;
+  subtotal: number;
+  shippingFee: number;
+  discountAmount: number;
+  amount: number;
+  customerName: string;
+  email: string;
+  phone: string;
+  birthDate: string | null;
+  shipName: string | null;
+  shipPhone: string | null;
+  shipAddress: string | null;
+  note: string | null;
+  vipPlanId: string | null;
+  vipMemberId: string | null;
+  holdExpiresAt: Date | null;
+  items: OrderItem[];
+}
+
+/** 訂單（含個資，給後台與寄信；公開查詢另外挑欄位） */
+export interface Order extends NewOrder {
+  id: string;
+  trackingNo: string | null;
+  paidAt: Date | null;
+  shippedAt: Date | null;
+  createdAt: Date;
+}
+
+export type OrderPatch = Partial<Pick<Order, 'status' | 'trackingNo' | 'shippedAt' | 'note'>>;
+
+/** apply_order_paid 的回傳 */
+export interface OrderPaidResult {
+  result: 'not_found' | 'already_paid' | 'amount_mismatch' | 'duplicate_payment' | 'paid';
+  order_no?: string;
+  kind?: CommerceKind;
+  card_no?: string | null;
+}
+
+export interface NewVipBooking {
+  orderNo: string;
+  serviceId: string;
+  startsAt: Date;
+  endsAt: Date;
+  cardNo: string;
+  customerName: string;
+  gender: 'female' | 'male';
+  birthDate: string;
+  birthTime: string | null;
+  birthPlace: string | null;
+  phone: string;
+  email: string;
+  questions: string | null;
+}
+
+export type VipBookingResult =
+  | { ok: true; id: string; sessionsLeft: number }
+  | { ok: false; reason: 'vip_not_found' | 'vip_expired' | 'vip_no_sessions' | 'slot_taken' | 'order_no_taken' };
 
 /** 寄信用（含個資，只在寄信時讀取，不可 log） */
 export interface BookingFull extends BookingPublic {
@@ -292,6 +404,35 @@ export interface Db {
   updateReferralCode(id: string, patch: ReferralCodePatch): Promise<ReferralCode | null>;
   /** created_at ∈ [from, to) 的使用紀錄（新到舊） */
   listReferralUses(q: { from: Date; to: Date; now: Date }): Promise<ReferralUseRow[]>;
+
+  // ---------- VIP 包堂、商店、贈品 ----------
+  listVipPlans(activeOnly: boolean): Promise<VipPlan[]>;
+  getVipPlan(id: string): Promise<VipPlan | null>;
+  createVipPlan(p: VipPlan): Promise<VipPlan | 'duplicate'>;
+  updateVipPlan(id: string, patch: VipPlanPatch): Promise<VipPlan | null>;
+  /** 訂單編號撞號 → 'order_no_taken' */
+  createOrder(o: NewOrder): Promise<{ ok: true; id: string } | { ok: false; reason: 'order_no_taken' }>;
+  getOrder(orderNo: string): Promise<Order | null>;
+  /** created_at ∈ [from, to)，新到舊 */
+  listOrders(q: { kinds: CommerceKind[] | null; statuses: OrderStatus[] | null; from: Date; to: Date; limit: number }): Promise<Order[]>;
+  updateOrder(orderNo: string, patch: OrderPatch): Promise<Order | null>;
+  /** 保留逾時未付款 → expired；回傳筆數 */
+  expireStaleOrders(now: Date): Promise<number>;
+  insertOrderPayment(p: { orderId: string; tradeNo: string; amount: number; raw: Record<string, unknown> }): Promise<void>;
+  countOrderPayments(orderId: string): Promise<number>;
+  /** SQL apply_order_paid：冪等；VIP 訂單建立會員（cardNo）、商店訂單扣庫存 */
+  applyOrderPaid(args: { tradeNo: string; amount: number; providerTxnId: string | null; raw: Record<string, unknown>; cardNo: string }): Promise<OrderPaidResult>;
+  markOrderPaymentFailed(tradeNo: string, raw: Record<string, unknown>): Promise<void>;
+  getVipMemberByCard(cardNo: string): Promise<VipMember | null>;
+  getVipMemberByOrder(orderId: string): Promise<VipMember | null>;
+  getVipMember(id: string): Promise<VipMember | null>;
+  /** search：姓名／Email／卡號／手機部分比對；birthMonth：1–12 */
+  listVipMembers(q: { search: string | null; birthMonth: number | null; limit: number }): Promise<VipMember[]>;
+  updateVipMember(id: string, patch: VipMemberPatch): Promise<VipMember | null>;
+  /** 這位 VIP 用堂數預約的紀錄（新到舊） */
+  listVipBookings(memberId: string): Promise<{ orderNo: string; startsAt: Date; status: BookingStatus; serviceName: string }[]>;
+  /** SQL create_vip_booking：卡號＋Email 對得上、未到期、有堂數 → 建立已確認的預約並扣一堂（單一交易） */
+  createVipBooking(b: NewVipBooking): Promise<VipBookingResult>;
 
   insertPayment(p: NewPayment): Promise<PaymentRow>;
   getPayment(provider: Provider, tradeNo: string): Promise<PaymentRow | null>;

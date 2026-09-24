@@ -24,6 +24,7 @@ export const MSG = {
   topicsTier: '主題數量與方案不符，請重新整理頁面後再選一次',
   questionRequired: '請填寫這一欄',
   referral: '推薦碼格式不正確',
+  vipCard: '請輸入正確的 VIP 卡號',
   tooLong: (n: number) => `請勿超過 ${n} 字`,
 } as const;
 
@@ -80,7 +81,14 @@ export const bookingBodySchema = z.object({
     .max(20, MSG.referral)
     .optional()
     .default(''),
-  pay_method: z.enum(['card', 'line', 'atm'], { errorMap: () => ({ message: MSG.payMethod }) }),
+  pay_method: z.enum(['card', 'line', 'atm', 'vip'], { errorMap: () => ({ message: MSG.payMethod }) }),
+  // VIP 堂數預約用（0007）
+  vip_card_no: z
+    .string({ invalid_type_error: MSG.vipCard })
+    .trim()
+    .max(20, MSG.vipCard)
+    .optional()
+    .default(''),
   agree: z.literal(true, { errorMap: () => ({ message: MSG.agree }) }),
 });
 
