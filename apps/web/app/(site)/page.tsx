@@ -39,7 +39,7 @@ export default async function HomePage() {
           <div className="flex max-w-[400px] flex-[1_1_260px] flex-col gap-6">
             <div aria-hidden="true" className="h-[2px] w-14 bg-hero-line" />
             <p className="text-pretty text-[17px] leading-[2.1] text-ink-600">
-              一對一線上諮詢，紫微斗數 × 八字合參。每一場都為你單獨排盤，不套模板、不販賣恐懼。
+              一對一線上諮詢，紫微斗數 × 八字合參。每一場都為你單獨排盤，不販賣恐懼。
             </p>
             <ul className="flex flex-col gap-[10px] text-[14px] text-ink-600">
               {HERO_POINTS.map((p) => (

@@ -5,7 +5,7 @@
 export const SITE_NAME = '緣舍命理';
 
 export const SITE_DESCRIPTION =
-  '一對一線上諮詢，紫微斗數 × 八字合參。每一場都為你單獨排盤，不套模板、不販賣恐懼。';
+  '一對一線上諮詢，紫微斗數 × 八字合參。每一場都為你單獨排盤，不販賣恐懼。';
 
 /**
  * 人物圖（目前是 SVG 佔位；設計稿的 uploads/images.jpeg 有他站浮水印，不可上線）
