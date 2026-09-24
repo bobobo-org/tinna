@@ -8,6 +8,7 @@ import type { LogFields, Logger } from '../../src/lib/log';
 import type { MailMessage, Mailer, SendResult } from '../../src/lib/mailer';
 import { BOOKING_RATE_LIMIT, PAYMENT_RATE_LIMIT } from '../../src/lib/policy';
 import { FixedWindowRateLimiter } from '../../src/lib/rate-limit';
+import type { ImageType, PublicStorage } from '../../src/lib/storage';
 import { MemoryDb } from './memory-db';
 
 export const ECPAY_TEST = {
@@ -54,6 +55,17 @@ export class FakeAuth implements AuthVerifier {
   }
 }
 
+/** 商品圖片：記在記憶體，回傳假的公開網址 */
+export class FakeStorage implements PublicStorage {
+  files = new Map<string, { bytes: Uint8Array; type: ImageType }>();
+  fail = false;
+  async upload(path: string, bytes: Uint8Array, contentType: ImageType) {
+    if (this.fail) throw new Error('storage down');
+    this.files.set(path, { bytes, type: contentType });
+    return `https://storage.example/products/${path}`;
+  }
+}
+
 /** 登記一個管理者並回傳帶 token 的 headers */
 export function adminHeaders(h: Harness, email = 'owner@example.com', token = 'admin-token'): Record<string, string> {
   h.auth.tokens.set(token, email);
@@ -84,6 +96,7 @@ export interface Harness {
   app: ReturnType<typeof createApp>;
   db: MemoryDb;
   auth: FakeAuth;
+  storage: FakeStorage;
   mailer: FakeMailer;
   logger: MemoryLogger;
   env: Env;
@@ -120,6 +133,7 @@ export function makeHarness(
   const env = loaded.env;
   const db = new MemoryDb(() => clock.now);
   const auth = new FakeAuth();
+  const storage = new FakeStorage();
   const mailer = new FakeMailer();
   const logger = new MemoryLogger();
   const pending: Promise<void>[] = [];
@@ -127,6 +141,7 @@ export function makeHarness(
     env,
     db,
     auth,
+    storage,
     mailer,
     linepay: env.linepay ? new LinePayClient(env.linepay, (opts.linepayFetch ?? fetch) as typeof fetch) : null,
     logger,
@@ -141,7 +156,7 @@ export function makeHarness(
   const flush = async () => {
     while (pending.length) await pending.shift();
   };
-  return { app, db, auth, mailer, logger, env, deps, clock, flush, linepayFetch: opts.linepayFetch };
+  return { app, db, auth, storage, mailer, logger, env, deps, clock, flush, linepayFetch: opts.linepayFetch };
 }
 
 /** 以測試金鑰簽一個綠界回呼 */

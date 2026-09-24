@@ -5,12 +5,15 @@ import type { LinePayClient } from './lib/linepay';
 import { errorFields, type Logger } from './lib/log';
 import type { Mailer } from './lib/mailer';
 import type { FixedWindowRateLimiter } from './lib/rate-limit';
+import type { PublicStorage } from './lib/storage';
 
 export interface AppDeps {
   env: Env;
   db: Db;
   /** 後台登入（Supabase Auth access token）驗證 */
   auth: AuthVerifier;
+  /** 商品圖片（Supabase Storage 公開 bucket） */
+  storage: PublicStorage;
   mailer: Mailer;
   linepay: LinePayClient | null;
   logger: Logger;

@@ -180,7 +180,7 @@ export default function VipPurchase({ plans }: { plans: VipPlan[] }) {
         aria-label="VIP 方案"
         aria-describedby={desc('plan_id')}
         tabIndex={-1}
-        className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-4 outline-none"
+        className="flex flex-wrap justify-center gap-4 outline-none"
       >
         {plans.map((p) => {
           const on = p.id === planId;
@@ -188,7 +188,7 @@ export default function VipPurchase({ plans }: { plans: VipPlan[] }) {
           return (
             <label
               key={p.id}
-              className={`lift flex cursor-pointer flex-col gap-2 rounded-[18px] px-5 py-6 shadow-card ${focusRingWithin} ${
+              className={`lift flex flex-[1_1_190px] cursor-pointer flex-col gap-2 rounded-[18px] px-5 py-6 shadow-card md:max-w-[240px] ${focusRingWithin} ${
                 on ? 'border-2 border-rose-600 bg-selected' : 'border border-rose-600/20 bg-card'
               }`}
             >

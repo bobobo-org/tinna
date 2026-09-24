@@ -13,6 +13,9 @@ import { referralRoutes } from './routes/referrals';
 import { orderRoutes } from './routes/orders';
 import { vipRoutes } from './routes/vip';
 import { adminCommerceRoutes } from './routes/admin-commerce';
+import { adminShopRoutes } from './routes/admin-shop';
+import { shopRoutes } from './routes/shop';
+import { MAX_UPLOAD_BYTES } from './lib/storage';
 import { metaRoutes } from './routes/meta';
 import { ecpayRoutes } from './routes/payments/ecpay';
 import { linepayRoutes } from './routes/payments/linepay';
@@ -66,13 +69,16 @@ export function createApp(deps: AppDeps) {
     await next();
   });
 
-  app.use(
-    '*',
-    bodyLimit({
-      maxSize: 64 * 1024,
-      onError: (c) => apiError(c, 413, 'payload_too_large', '資料太大了'),
-    }),
-  );
+  // body 上限：一般 64KB；後台上傳商品圖片 5MB
+  const smallBody = bodyLimit({
+    maxSize: 64 * 1024,
+    onError: (c) => apiError(c, 413, 'payload_too_large', '資料太大了'),
+  });
+  const uploadBody = bodyLimit({
+    maxSize: MAX_UPLOAD_BYTES,
+    onError: (c) => apiError(c, 413, 'payload_too_large', '圖片太大了（最多 5MB）'),
+  });
+  app.use('*', (c, next) => (c.req.path === '/admin/uploads' ? uploadBody(c, next) : smallBody(c, next)));
 
   // E. 跨站建單防護：瀏覽器端的 JSON POST 端點
   //  * Content-Type 必須是 application/json（text/plain 等「簡單請求」不會觸發 CORS 預檢，任何網站都能送）→ 否則 415
@@ -121,6 +127,8 @@ export function createApp(deps: AppDeps) {
   app.route('/', vipRoutes(deps));
   app.route('/', orderRoutes(deps));
   app.route('/', adminCommerceRoutes(deps));
+  app.route('/', shopRoutes(deps));
+  app.route('/', adminShopRoutes(deps));
   app.route('/', availabilityRoutes(deps));
   app.route('/', bookingRoutes(deps));
   app.route('/', ecpayRoutes(deps));

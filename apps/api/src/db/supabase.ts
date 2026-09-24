@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { AuthVerifier } from '../lib/admin-auth';
+import { IMAGE_TYPES, MAX_UPLOAD_BYTES, PRODUCT_BUCKET, type PublicStorage } from '../lib/storage';
 import type { ReferralCode } from '../lib/referral';
 import { normalizeTime } from '../lib/time';
 import {
@@ -22,11 +23,15 @@ import {
   type KolPatch,
   type NewBooking,
   type NewOrder,
+  type NewProduct,
   type NewVipBooking,
   type Order,
   type OrderPaidResult,
   type OrderPatch,
   type OrderStatus,
+  type Product,
+  type ProductPatch,
+  type ShopSettings,
   type NewKol,
   type NewPayment,
   type NewReferralCode,
@@ -209,6 +214,52 @@ function mapVipMember(r: Row): VipMember {
     orderId: r.order_id ?? null,
     note: r.note ?? null,
     createdAt: new Date(r.created_at),
+  };
+}
+
+const PRODUCT_COLUMNS = 'id,slug,name,description,price,images,stock,for_sale,active,sort,created_at';
+
+function mapProduct(r: Row): Product {
+  return {
+    id: r.id,
+    slug: r.slug,
+    name: r.name,
+    description: r.description ?? null,
+    price: r.price,
+    images: Array.isArray(r.images) ? r.images : [],
+    stock: r.stock,
+    forSale: !!r.for_sale,
+    active: !!r.active,
+    sort: r.sort ?? 0,
+    createdAt: new Date(r.created_at),
+  };
+}
+
+function productRow(p: ProductPatch): Row {
+  const row: Row = {};
+  if (p.slug !== undefined) row.slug = p.slug;
+  if (p.name !== undefined) row.name = p.name;
+  if (p.description !== undefined) row.description = p.description;
+  if (p.price !== undefined) row.price = p.price;
+  if (p.images !== undefined) row.images = p.images;
+  if (p.stock !== undefined) row.stock = p.stock;
+  if (p.forSale !== undefined) row.for_sale = p.forSale;
+  if (p.active !== undefined) row.active = p.active;
+  if (p.sort !== undefined) row.sort = p.sort;
+  return row;
+}
+
+/** 預設運費（settings 表沒有值時） */
+export const DEFAULT_SHIPPING_FEE = 100;
+
+/** settings 的 shipping_fee／free_shipping_over（jsonb）→ ShopSettings；不是數字就用預設值／不提供免運 */
+export function parseShopSettings(rows: { key: string; value: unknown }[]): ShopSettings {
+  const get = (k: string) => rows.find((r) => r.key === k)?.value;
+  const fee = get('shipping_fee');
+  const free = get('free_shipping_over');
+  return {
+    shippingFee: typeof fee === 'number' && Number.isFinite(fee) && fee >= 0 ? Math.round(fee) : DEFAULT_SHIPPING_FEE,
+    freeShippingOver: typeof free === 'number' && Number.isFinite(free) && free > 0 ? Math.round(free) : null,
   };
 }
 
@@ -903,6 +954,81 @@ export class SupabaseDb implements Db {
     throw new DbError('createVipBooking', undefined, `unexpected result ${String(r.result)}`);
   }
 
+  // ---------- 商店商品、運費、贈品 ----------
+
+  async listProducts(q: { publicOnly: boolean }): Promise<Product[]> {
+    let query = this.sb
+      .from('products')
+      .select(PRODUCT_COLUMNS)
+      .order('sort', { ascending: true })
+      .order('created_at', { ascending: false });
+    if (q.publicOnly) query = query.eq('active', true).eq('for_sale', true);
+    const { data, error } = await query;
+    if (error) fail('listProducts', error);
+    return (data ?? []).map(mapProduct);
+  }
+
+  async getProduct(id: string): Promise<Product | null> {
+    const { data, error } = await this.sb.from('products').select(PRODUCT_COLUMNS).eq('id', id).maybeSingle();
+    if (error) fail('getProduct', error);
+    return data ? mapProduct(data) : null;
+  }
+
+  async getProductBySlug(slug: string): Promise<Product | null> {
+    const { data, error } = await this.sb.from('products').select(PRODUCT_COLUMNS).eq('slug', slug).maybeSingle();
+    if (error) fail('getProductBySlug', error);
+    return data ? mapProduct(data) : null;
+  }
+
+  async getProductsByIds(ids: string[]): Promise<Product[]> {
+    if (ids.length === 0) return [];
+    const { data, error } = await this.sb.from('products').select(PRODUCT_COLUMNS).in('id', ids);
+    if (error) fail('getProductsByIds', error);
+    return (data ?? []).map(mapProduct);
+  }
+
+  async createProduct(p: NewProduct): Promise<Product | 'duplicate'> {
+    const { data, error } = await this.sb.from('products').insert(productRow(p)).select(PRODUCT_COLUMNS).single();
+    if (error?.code === '23505') return 'duplicate';
+    if (error) fail('createProduct', error);
+    return mapProduct(data);
+  }
+
+  async updateProduct(id: string, patch: ProductPatch): Promise<Product | null | 'duplicate'> {
+    const { data, error } = await this.sb.from('products').update(productRow(patch)).eq('id', id).select(PRODUCT_COLUMNS).maybeSingle();
+    if (error?.code === '23505') return 'duplicate';
+    if (error) fail('updateProduct', error);
+    return data ? mapProduct(data) : null;
+  }
+
+  async getShopSettings(): Promise<ShopSettings> {
+    const { data, error } = await this.sb.from('settings').select('key,value').in('key', ['shipping_fee', 'free_shipping_over']);
+    if (error) fail('getShopSettings', error);
+    return parseShopSettings(data ?? []);
+  }
+
+  async updateShopSettings(patch: Partial<ShopSettings>): Promise<ShopSettings> {
+    const now = new Date().toISOString();
+    if (patch.shippingFee !== undefined) {
+      const { error } = await this.sb.from('settings').upsert({ key: 'shipping_fee', value: patch.shippingFee, updated_at: now });
+      if (error) fail('updateShopSettings.shipping_fee', error);
+    }
+    if (patch.freeShippingOver !== undefined) {
+      // value 是 jsonb not null：不提供免運時刪掉這一列（讀取時沒有值＝不提供）
+      const { error } =
+        patch.freeShippingOver === null
+          ? await this.sb.from('settings').delete().eq('key', 'free_shipping_over')
+          : await this.sb.from('settings').upsert({ key: 'free_shipping_over', value: patch.freeShippingOver, updated_at: now });
+      if (error) fail('updateShopSettings.free_shipping_over', error);
+    }
+    return this.getShopSettings();
+  }
+
+  async consumeOrderStock(orderId: string): Promise<void> {
+    const { error } = await this.sb.rpc('consume_order_stock', { p_order_id: orderId });
+    if (error) fail('consumeOrderStock', error);
+  }
+
   async insertPayment(p: NewPayment): Promise<PaymentRow> {
     const { data, error } = await this.sb
       .from('payments')
@@ -1041,4 +1167,39 @@ export class SupabaseDb implements Db {
     if (error) fail('markPaymentFailed', error);
     return data as FailedResult;
   }
+}
+
+/**
+ * 商品圖片：Supabase Storage 的公開 bucket（第一次上傳時建立；建立失敗下次再試）
+ */
+export function createSupabaseStorage(url: string, serviceRoleKey: string): PublicStorage {
+  const sb: SupabaseClient = createClient(url, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+  let ready: Promise<void> | null = null;
+  const ensureBucket = () => {
+    ready ??= (async () => {
+      const { data } = await sb.storage.getBucket(PRODUCT_BUCKET);
+      if (data) return;
+      const { error } = await sb.storage.createBucket(PRODUCT_BUCKET, {
+        public: true,
+        fileSizeLimit: MAX_UPLOAD_BYTES,
+        allowedMimeTypes: Object.keys(IMAGE_TYPES),
+      });
+      if (error && !/already exists/i.test(error.message)) throw new DbError('storage.createBucket', undefined, error.message);
+    })().catch((e: unknown) => {
+      ready = null;
+      throw e;
+    });
+    return ready;
+  };
+  return {
+    async upload(path, bytes, contentType) {
+      await ensureBucket();
+      const bucket = sb.storage.from(PRODUCT_BUCKET);
+      const { error } = await bucket.upload(path, bytes, { contentType, cacheControl: '31536000', upsert: false });
+      if (error) throw new DbError('storage.upload', undefined, error.message);
+      return bucket.getPublicUrl(path).data.publicUrl;
+    },
+  };
 }

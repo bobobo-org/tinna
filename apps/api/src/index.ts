@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { serve } from '@hono/node-server';
 import { createApp } from './app';
-import { createSupabaseAuth, createSupabaseDb } from './db/supabase';
+import { createSupabaseAuth, createSupabaseDb, createSupabaseStorage } from './db/supabase';
 import { fireAndForget, type AppDeps } from './deps';
 import { loadEnv } from './env';
 import { startJobs } from './jobs/expire-holds';
@@ -36,6 +36,7 @@ const deps: AppDeps = {
   env,
   db: createSupabaseDb(env.supabaseUrl, env.supabaseServiceRoleKey),
   auth: createSupabaseAuth(env.supabaseUrl, env.supabaseServiceRoleKey),
+  storage: createSupabaseStorage(env.supabaseUrl, env.supabaseServiceRoleKey),
   mailer: new ResendMailer(env.mail, log),
   linepay: env.linepay ? new LinePayClient(env.linepay) : null,
   logger: log,

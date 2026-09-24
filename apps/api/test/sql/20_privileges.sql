@@ -11,7 +11,8 @@ declare
     'public.flag_payment_attention(text,text,text,jsonb,text)',
     'public.normalize_phone(text)',
     'public.apply_order_paid(text,integer,text,jsonb,text)',
-    'public.create_vip_booking(text,text,timestamptz,timestamptz,text,text,text,date,time,text,text,text,text)'
+    'public.create_vip_booking(text,text,timestamptz,timestamptz,text,text,text,date,time,text,text,text,text)',
+    'public.consume_order_stock(uuid)'
   ];
   f text;
 begin

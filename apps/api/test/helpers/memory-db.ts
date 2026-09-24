@@ -22,11 +22,15 @@ import {
   type NewKol,
   type NewOrder,
   type NewPayment,
+  type NewProduct,
   type NewVipBooking,
   type Order,
   type OrderPaidResult,
   type OrderPatch,
   type OrderStatus,
+  type Product,
+  type ProductPatch,
+  type ShopSettings,
   type NewReferralCode,
   type NewReferralUse,
   type ReferralCodePatch,
@@ -147,20 +151,8 @@ export interface MemOrderPayment {
   paidAt: Date | null;
 }
 
-/** 商店商品（Phase 4 會用到；apply_order_paid 扣庫存） */
-export interface MemProduct {
-  id: string;
-  slug: string;
-  name: string;
-  description: string | null;
-  price: number;
-  images: string[];
-  stock: number;
-  forSale: boolean;
-  active: boolean;
-  sort: number;
-  createdAt: Date;
-}
+/** 商店商品（apply_order_paid／consume_order_stock 扣庫存） */
+export type MemProduct = Product;
 
 export const SEED_WEEKLY: WeeklySlotRow[] = [0, 2, 3, 4, 5, 6].flatMap((weekday) =>
   ['10:00', '13:30', '15:30', '19:00', '20:30'].map((time) => ({ weekday, time })),
@@ -631,6 +623,87 @@ export class MemoryDb implements Db {
     });
     m.sessionsUsed += 1;
     return { ok: true, id: b.id, sessionsLeft: m.sessionsTotal - m.sessionsUsed };
+  }
+
+  // ---------- 商店商品、運費、贈品 ----------
+  shopSettings: ShopSettings = { shippingFee: 100, freeShippingOver: null };
+
+  private copyProduct(p: Product): Product {
+    return { ...p, images: [...p.images] };
+  }
+
+  /** 測試用：直接加一個商品 */
+  addProduct(p: Partial<Product> & Pick<Product, 'name' | 'price'>): Product {
+    const row: Product = {
+      id: randomUUID(),
+      slug: `p-${this.products.length + 1}`,
+      description: null,
+      images: [],
+      stock: 10,
+      forSale: true,
+      active: true,
+      sort: 0,
+      createdAt: this.clock(),
+      ...p,
+    };
+    this.products.push(row);
+    return row;
+  }
+
+  async listProducts(q: { publicOnly: boolean }) {
+    return this.products
+      .filter((p) => !q.publicOnly || (p.active && p.forSale))
+      .sort((a, b) => a.sort - b.sort || b.createdAt.getTime() - a.createdAt.getTime())
+      .map((p) => this.copyProduct(p));
+  }
+
+  async getProduct(id: string) {
+    const p = this.products.find((x) => x.id === id);
+    return p ? this.copyProduct(p) : null;
+  }
+
+  async getProductBySlug(slug: string) {
+    const p = this.products.find((x) => x.slug === slug);
+    return p ? this.copyProduct(p) : null;
+  }
+
+  async getProductsByIds(ids: string[]) {
+    return this.products.filter((p) => ids.includes(p.id)).map((p) => this.copyProduct(p));
+  }
+
+  async createProduct(np: NewProduct): Promise<Product | 'duplicate'> {
+    if (this.products.some((p) => p.slug === np.slug)) return 'duplicate';
+    const p: Product = { ...np, images: [...np.images], id: randomUUID(), createdAt: this.clock() };
+    this.products.push(p);
+    return this.copyProduct(p);
+  }
+
+  async updateProduct(id: string, patch: ProductPatch): Promise<Product | null | 'duplicate'> {
+    const p = this.products.find((x) => x.id === id);
+    if (!p) return null;
+    if (patch.slug !== undefined && this.products.some((x) => x.id !== id && x.slug === patch.slug)) return 'duplicate';
+    Object.assign(p, patch);
+    if (patch.images) p.images = [...patch.images];
+    return this.copyProduct(p);
+  }
+
+  async getShopSettings() {
+    return { ...this.shopSettings };
+  }
+
+  async updateShopSettings(patch: Partial<ShopSettings>) {
+    Object.assign(this.shopSettings, patch);
+    return { ...this.shopSettings };
+  }
+
+  /** 對齊 0008 consume_order_stock */
+  async consumeOrderStock(orderId: string) {
+    const o = this.orders.find((x) => x.id === orderId);
+    if (!o) return;
+    for (const i of o.items) {
+      const p = this.products.find((x) => x.id === i.productId);
+      if (p) p.stock = Math.max(0, p.stock - i.qty);
+    }
   }
 
   // ---------- Db ----------

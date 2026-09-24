@@ -104,3 +104,26 @@ begin
   assert r->>'result' = 'vip_expired', 'expired: ' || r::text;
   raise notice 'PASS create_vip_booking';
 end $$;
+
+-- 0008：贈品訂單扣庫存（不會扣成負數；沒有商品的品項略過）
+do $$
+declare
+  v_a     uuid;
+  v_b     uuid;
+  v_order uuid;
+begin
+  insert into public.products (slug, name, price, stock, for_sale) values ('sqltest-gift-a', '贈品 A', 0, 3, false) returning id into v_a;
+  insert into public.products (slug, name, price, stock) values ('sqltest-gift-b', '贈品 B', 500, 1) returning id into v_b;
+  insert into public.orders (order_no, kind, status, subtotal, amount, customer_name, email, phone, ship_name, ship_phone, ship_address)
+  values ('YSGGGGGGG2', 'gift', 'paid', 500, 0, 'G', 'g@example.com', '0912345678', 'G', '0912345678', '台北市信義區松仁路 1 號')
+  returning id into v_order;
+  insert into public.order_items (order_id, product_id, name, unit_price, qty) values
+    (v_order, v_a, '贈品 A', 0, 2),
+    (v_order, v_b, '贈品 B', 500, 3),
+    (v_order, null, '手寫卡片', 0, 1);
+
+  perform public.consume_order_stock(v_order);
+  assert (select stock from public.products where id = v_a) = 1, 'gift stock decremented';
+  assert (select stock from public.products where id = v_b) = 0, 'gift stock not negative';
+  raise notice 'PASS consume_order_stock';
+end $$;

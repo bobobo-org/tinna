@@ -194,7 +194,8 @@ export function adminAlertEmail(
 const KIND_LABEL: Record<Order['kind'], string> = { vip: 'VIP 包堂', shop: '商店訂單', gift: 'VIP 贈品' };
 
 function itemRows(o: Order): [string, string][] {
-  return o.items.map((i) => [i.name, `${ntd(i.unitPrice)} × ${i.qty}`]);
+  // 贈品不顯示價格
+  return o.items.map((i) => [i.name, o.kind === 'gift' ? `× ${i.qty}` : `${ntd(i.unitPrice)} × ${i.qty}`]);
 }
 
 /** VIP 購買成功：卡號與使用方式 */

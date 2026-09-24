@@ -266,6 +266,35 @@ export interface NewVipBooking {
   questions: string | null;
 }
 
+// ---------- 商店商品（0007）與運費設定 ----------
+
+export interface Product {
+  id: string;
+  /** 網址代號：/shop/<slug> */
+  slug: string;
+  name: string;
+  description: string | null;
+  price: number;
+  /** 圖片網址（第一張當封面） */
+  images: string[];
+  stock: number;
+  /** 上架販售（false：只當 VIP 贈品） */
+  forSale: boolean;
+  active: boolean;
+  sort: number;
+  createdAt: Date;
+}
+
+export type NewProduct = Omit<Product, 'id' | 'createdAt'>;
+export type ProductPatch = Partial<NewProduct>;
+
+export interface ShopSettings {
+  /** 運費（元） */
+  shippingFee: number;
+  /** 滿額免運門檻（商品小計 ≥ 這個金額免運；null＝不提供） */
+  freeShippingOver: number | null;
+}
+
 export type VipBookingResult =
   | { ok: true; id: string; sessionsLeft: number }
   | { ok: false; reason: 'vip_not_found' | 'vip_expired' | 'vip_no_sessions' | 'slot_taken' | 'order_no_taken' };
@@ -433,6 +462,20 @@ export interface Db {
   listVipBookings(memberId: string): Promise<{ orderNo: string; startsAt: Date; status: BookingStatus; serviceName: string }[]>;
   /** SQL create_vip_booking：卡號＋Email 對得上、未到期、有堂數 → 建立已確認的預約並扣一堂（單一交易） */
   createVipBooking(b: NewVipBooking): Promise<VipBookingResult>;
+
+  // ---------- 商店商品、運費、贈品 ----------
+  /** publicOnly：只回上架販售中的（active 且 for_sale）；依 sort、新到舊 */
+  listProducts(q: { publicOnly: boolean }): Promise<Product[]>;
+  getProduct(id: string): Promise<Product | null>;
+  getProductBySlug(slug: string): Promise<Product | null>;
+  getProductsByIds(ids: string[]): Promise<Product[]>;
+  /** slug 重複 → 'duplicate' */
+  createProduct(p: NewProduct): Promise<Product | 'duplicate'>;
+  updateProduct(id: string, patch: ProductPatch): Promise<Product | null | 'duplicate'>;
+  getShopSettings(): Promise<ShopSettings>;
+  updateShopSettings(patch: Partial<ShopSettings>): Promise<ShopSettings>;
+  /** SQL consume_order_stock：依訂單品項扣庫存（贈品建立時；不會扣成負數） */
+  consumeOrderStock(orderId: string): Promise<void>;
 
   insertPayment(p: NewPayment): Promise<PaymentRow>;
   getPayment(provider: Provider, tradeNo: string): Promise<PaymentRow | null>;

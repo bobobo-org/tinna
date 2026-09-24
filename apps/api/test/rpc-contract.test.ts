@@ -39,6 +39,7 @@ function recordingClient() {
     flag_payment_attention: { result: 'flagged' },
     apply_order_paid: { result: 'paid', order_no: 'YS8K2M4Q7T', kind: 'vip', card_no: 'VIP-AB2C-D3EF' },
     create_vip_booking: { result: 'created', id: 'x', sessions_left: 3 },
+    consume_order_stock: null,
   };
   const client = {
     rpc: async (name: string, params: Record<string, unknown>) => {
@@ -104,6 +105,7 @@ describe('RPC 參數名稱與 SQL 函式簽章一致', () => {
       email: 'a@b.co',
       questions: null,
     });
+    await db.consumeOrderStock('00000000-0000-0000-0000-000000000000');
 
     const sigs = sqlSignatures();
     expect(calls.map((c) => c.name).sort()).toEqual(
@@ -111,6 +113,7 @@ describe('RPC 參數名稱與 SQL 函式簽章一致', () => {
         'apply_atm_issued',
         'apply_order_paid',
         'apply_payment_paid',
+        'consume_order_stock',
         'create_booking',
         'create_vip_booking',
         'expire_stale_holds',
