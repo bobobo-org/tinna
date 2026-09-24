@@ -206,9 +206,15 @@ export default function BookingSuccess({ orderNo: rawOrderNo, serverNow }: { ord
           ? `還沒有取得轉帳帳號，請在 30 分鐘內完成取號${until ? `（時段保留至 ${until}）` : ''}；已取號請稍後重新整理本頁。`
           : `還沒有收到這筆訂單的付款結果。已付款請稍後重新整理本頁；尚未付款可以重新付款${until ? `，時段保留至 ${until}` : ''}。`;
     } else if (status === 'attention') {
-      mark = '✓';
-      title = '款項已收到';
-      sub = '已收到您的款項，此時段已被預約，我們會儘快與您聯繫改期或退款。';
+      if (b.status === 'pending_payment') {
+        // 金流回報「付款結果待確認」或結果不明：還不能說已收款
+        title = '付款確認中';
+        sub = '我們已收到您的付款資訊，需要由專人確認付款結果，會儘快與您聯繫。請勿重複付款。';
+      } else {
+        mark = '✓';
+        title = '款項已收到';
+        sub = '已收到您的款項，此時段已被預約，我們會儘快與您聯繫改期或退款。';
+      }
     } else if (status === 'refunded') {
       title = '訂單已退款';
       sub = '這筆訂單已完成退款。如仍需要諮詢，歡迎重新預約。';

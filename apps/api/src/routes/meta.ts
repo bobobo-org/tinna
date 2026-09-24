@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import type { AppDeps } from '../deps';
+import { ATM_MIN_LEAD_HOURS } from '../lib/policy';
 import { toTaipeiIso } from '../lib/time';
 
 export function metaRoutes(deps: AppDeps) {
@@ -9,10 +10,12 @@ export function metaRoutes(deps: AppDeps) {
   app.get('/health', (c) => c.json({ ok: true, time: toTaipeiIso(deps.now()), version: deps.env.buildSha }));
 
   app.get('/config', (c) => {
-    const ecpay = !!deps.env.ecpay;
+    const ecpay = deps.env.ecpay;
     return c.json({
-      payments: { card: ecpay, atm: ecpay, line: !!deps.linepay },
-      paymentEnv: deps.env.ecpay?.env === 'prod' ? 'prod' : 'stage',
+      payments: { card: !!ecpay, atm: !!ecpay, line: !!deps.linepay },
+      // 綠界未設定 → null（前端只在 "stage" 時顯示測試環境字樣）
+      paymentEnv: ecpay ? ecpay.env : null,
+      atmMinLeadHours: ATM_MIN_LEAD_HOURS,
     });
   });
 

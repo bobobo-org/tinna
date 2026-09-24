@@ -8,8 +8,8 @@ import { startJobs } from './jobs/expire-holds';
 import { LinePayClient } from './lib/linepay';
 import { log } from './lib/log';
 import { ResendMailer } from './lib/mailer';
+import { BOOKING_RATE_LIMIT, PAYMENT_RATE_LIMIT } from './lib/policy';
 import { FixedWindowRateLimiter } from './lib/rate-limit';
-import { HOUR_MS } from './lib/time';
 
 /**
  * 讀 apps/api/BUILD_SHA（CI 在 railway up 前 echo $GITHUB_SHA 寫入）。
@@ -39,7 +39,8 @@ const deps: AppDeps = {
   linepay: env.linepay ? new LinePayClient(env.linepay) : null,
   logger: log,
   now: () => new Date(),
-  bookingLimiter: new FixedWindowRateLimiter(10, HOUR_MS), // 每 IP 每小時 10 次
+  bookingLimiter: new FixedWindowRateLimiter(BOOKING_RATE_LIMIT.limit, BOOKING_RATE_LIMIT.windowMs),
+  paymentLimiter: new FixedWindowRateLimiter(PAYMENT_RATE_LIMIT.limit, PAYMENT_RATE_LIMIT.windowMs),
   defer: fireAndForget(log),
 };
 

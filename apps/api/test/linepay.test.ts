@@ -91,7 +91,7 @@ describe('LINE Pay 未設定', () => {
   it('/config line=false、request 回 503', async () => {
     const h = makeHarness({ now: NOW });
     const cfg = (await (await h.app.request('/config')).json()) as Record<string, any>;
-    expect(cfg).toEqual({ payments: { card: true, atm: true, line: false }, paymentEnv: 'stage' });
+    expect(cfg).toEqual({ payments: { card: true, atm: true, line: false }, paymentEnv: 'stage', atmMinLeadHours: 72 });
     const res = await postJson(h, '/payments/linepay/request', { orderNo: 'YS22222222' });
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({

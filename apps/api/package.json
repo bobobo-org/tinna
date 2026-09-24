@@ -7,7 +7,8 @@
     "build": "tsup src/index.ts --format esm --target node22 --clean",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:sql": "bash test/sql/run.sh"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.0",

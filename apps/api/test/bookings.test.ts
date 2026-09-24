@@ -112,10 +112,10 @@ describe('POST /bookings：時段', () => {
     expect(row.birthTime).toBeNull();
   });
 
-  it('ATM hold 24 小時', async () => {
+  it('ATM 取號前 hold 30 分鐘（審查 A；原本 24 小時）', async () => {
     const h = makeHarness({ now: NOW });
     const b = await body(await postJson(h, '/bookings', { ...valid, pay_method: 'atm' }));
-    expect(b.holdExpiresAt).toBe('2026-09-25T10:00:00+08:00');
+    expect(b.holdExpiresAt).toBe('2026-09-24T10:30:00+08:00');
   });
 
   it('週一公休 / 不在時段表 / 24 小時內 / 超出月份 → 409 slot_unavailable', async () => {
@@ -195,10 +195,10 @@ describe('POST /bookings：時段', () => {
 });
 
 describe('POST /bookings：限流', () => {
-  it('同一 IP（x-forwarded-for 第一段）每小時 10 次，第 11 次 429', async () => {
+  it('同一 IP 每小時 30 次（CGNAT 放寬），第 31 次 429', async () => {
     const h = makeHarness({ now: NOW });
     const headers = { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' };
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 30; i++) {
       const res = await postJson(h, '/bookings', { ...valid, name: '' }, headers);
       expect(res.status).toBe(400);
     }
@@ -233,6 +233,7 @@ describe('GET /bookings/:orderNo', () => {
       time: '19:00',
       startsAt: '2026-10-07T19:00:00+08:00',
       holdExpiresAt: '2026-09-24T10:15:00+08:00',
+      needsAttention: false,
     });
     const text = JSON.stringify(b);
     for (const pii of ['王小美', '0912345678', 'a@b.co', '1995-03-12', '今年感情', '台北市']) {

@@ -6,6 +6,13 @@ import { validateBookingBody } from '../lib/booking-schema';
 import { apiError, readJsonObject, requestIp } from '../lib/http';
 import { generateOrderNo, isOrderNo } from '../lib/order-no';
 import {
+  ATM_MIN_LEAD_HOURS,
+  HOLD_MS,
+  MAX_PENDING_ATM,
+  MAX_PENDING_PER_CUSTOMER,
+} from '../lib/policy';
+import { rateLimitKey } from '../lib/rate-limit';
+import {
   HOUR_MS,
   MINUTE_MS,
   formatEcpayDateTime,
@@ -15,14 +22,11 @@ import {
   toTaipeiIso,
 } from '../lib/time';
 
-export const HOLD_MS: Record<PayMethod, number> = {
-  card: 15 * MINUTE_MS,
-  line: 15 * MINUTE_MS,
-  atm: 24 * HOUR_MS,
-};
-
 const MSG_SLOT_TAKEN = '這個時段剛被預約，請重新選擇時段';
 const MSG_SLOT_UNAVAILABLE = '這個時段目前無法預約，請重新選擇時段';
+const MSG_TOO_MANY_PENDING = '您已有尚未完成付款的預約，請先完成付款，或稍後再試';
+const MSG_ATM_LEAD = `ATM 轉帳需於諮詢開始 ${ATM_MIN_LEAD_HOURS} 小時前預約，請改用信用卡`;
+const MSG_ATM_FULL = 'ATM 轉帳名額暫滿，請改用信用卡';
 
 export function methodUnavailableMessage(deps: AppDeps, method: PayMethod): string | null {
   if (method === 'line') return deps.linepay ? null : 'LINE Pay 即將開放，請改用信用卡或 ATM 轉帳';
@@ -42,6 +46,7 @@ export function toPublicJson(b: BookingPublic) {
     time: taipeiTime(b.startsAt),
     startsAt: toTaipeiIso(b.startsAt),
     holdExpiresAt: b.holdExpiresAt ? toTaipeiIso(b.holdExpiresAt) : null,
+    needsAttention: b.needsAttention,
     ...(b.atmAccount
       ? {
           atm: {
@@ -58,7 +63,7 @@ export function bookingRoutes(deps: AppDeps) {
   const app = new Hono();
 
   app.post('/bookings', async (c) => {
-    const rl = deps.bookingLimiter.hit(requestIp(c));
+    const rl = deps.bookingLimiter.hit(rateLimitKey(requestIp(c)));
     if (!rl.allowed) {
       c.header('Retry-After', String(rl.retryAfterSec));
       deps.logger.warn('booking.rate_limited', { retry_after: rl.retryAfterSec });
@@ -88,27 +93,26 @@ export function bookingRoutes(deps: AppDeps) {
       return apiError(c, 409, 'slot_unavailable', MSG_SLOT_UNAVAILABLE);
     }
 
-    const endsAt = new Date(startsAt.getTime() + service.minutes * MINUTE_MS);
-    // 先釋出與這個時段重疊、已逾時但背景工作還沒處理到的保留，避免撞 unique index／重疊約束
-    await deps.db.expireStaleHolds({ from: startsAt, to: endsAt });
-
-    const [weekly, overrides, busy] = await Promise.all([
-      deps.db.listWeeklySlots(),
-      deps.db.listOverrides(d.date, d.date),
-      deps.db.listBusyBookings(new Date(startsAt.getTime() - 24 * HOUR_MS), new Date(startsAt.getTime() + 24 * HOUR_MS)),
-    ]);
-    const day = computeDay(d.date, { now, weekly, overrides, busy, durationMinutes: service.minutes });
+    // 時段必須在老師的時段表內（每週時段 ∪ 加開，未公休）。是否已被占用交給 create_booking 在交易內判斷
+    // （它會先釋出過期保留、取消同一人同時段的舊保留，再以 unique index／重疊約束擋下衝突）
+    const [weekly, overrides] = await Promise.all([deps.db.listWeeklySlots(), deps.db.listOverrides(d.date, d.date)]);
+    const day = computeDay(d.date, { now, weekly, overrides, busy: [], durationMinutes: service.minutes });
     const slot = day.slots.find((s) => s.time === d.time);
-    if (!slot || day.status === 'closed' || day.status === 'past') {
+    if (!slot || !slot.available || day.status === 'closed' || day.status === 'past') {
       return apiError(c, 409, 'slot_unavailable', MSG_SLOT_UNAVAILABLE);
     }
-    if (!slot.available) return apiError(c, 409, 'slot_taken', MSG_SLOT_TAKEN);
 
+    // C. ATM 只接受 72 小時以後的時段
+    if (d.pay_method === 'atm' && startsAt.getTime() < now.getTime() + ATM_MIN_LEAD_HOURS * HOUR_MS) {
+      return apiError(c, 400, 'validation', MSG_ATM_LEAD, { pay_method: MSG_ATM_LEAD });
+    }
+
+    const endsAt = new Date(startsAt.getTime() + service.minutes * MINUTE_MS);
     const holdExpiresAt = new Date(now.getTime() + HOLD_MS[d.pay_method]);
 
     for (let attempt = 0; attempt < 5; attempt++) {
       const orderNo = generateOrderNo();
-      const r = await deps.db.insertBooking({
+      const r = await deps.db.createBooking({
         orderNo,
         serviceId: service.id,
         startsAt,
@@ -124,13 +128,14 @@ export function bookingRoutes(deps: AppDeps) {
         phone: d.phone,
         email: d.email,
         questions: d.questions.trim() || null,
-      });
+      }, { maxPendingPerCustomer: MAX_PENDING_PER_CUSTOMER, maxPendingAtm: MAX_PENDING_ATM });
       if (r.ok) {
         deps.logger.info('booking.created', {
           order: orderNo,
           service: service.id,
           starts_at: toTaipeiIso(startsAt),
           method: d.pay_method,
+          replaced: r.replaced,
         });
         return c.json(
           {
@@ -146,6 +151,14 @@ export function bookingRoutes(deps: AppDeps) {
       if (r.reason === 'slot_taken') {
         deps.logger.info('booking.slot_taken', { starts_at: toTaipeiIso(startsAt) });
         return apiError(c, 409, 'slot_taken', MSG_SLOT_TAKEN);
+      }
+      if (r.reason === 'too_many_pending') {
+        deps.logger.warn('booking.too_many_pending', { starts_at: toTaipeiIso(startsAt) });
+        return apiError(c, 409, 'too_many_pending', MSG_TOO_MANY_PENDING);
+      }
+      if (r.reason === 'atm_full') {
+        deps.logger.warn('booking.atm_full', {});
+        return apiError(c, 400, 'validation', MSG_ATM_FULL, { pay_method: MSG_ATM_FULL });
       }
       // order_no 撞號 → 換一個再試
     }

@@ -1,3 +1,5 @@
+import { BlockList, isIP } from 'node:net';
+
 // 記憶體固定視窗限流（單一程序即可；多副本時各自計數）
 
 export interface RateLimitResult {
@@ -52,15 +54,87 @@ export class FixedWindowRateLimiter {
   }
 }
 
+// ---------------------------------------------------------------------
+// 用戶端 IP：X-Forwarded-For 由右往左，跳過受信任（proxy／內網）的段，取第一個非受信任 IP。
+// 不論 Railway 邊緣是「覆寫」還是「附加」XFF 都安全：用戶端偽造的值只會出現在左邊，不會被選到。
+// ---------------------------------------------------------------------
+
+const TRUSTED = new BlockList();
+for (const [net, prefix] of [
+  ['0.0.0.0', 8],
+  ['10.0.0.0', 8],
+  ['100.64.0.0', 10], // CGNAT／平台內部
+  ['127.0.0.0', 8],
+  ['169.254.0.0', 16],
+  ['172.16.0.0', 12],
+  ['192.168.0.0', 16],
+] as const) {
+  TRUSTED.addSubnet(net, prefix, 'ipv4');
+}
+for (const [net, prefix] of [
+  ['::', 128],
+  ['::1', 128],
+  ['fc00::', 7], // ULA
+  ['fe80::', 10], // link-local
+] as const) {
+  TRUSTED.addSubnet(net, prefix, 'ipv6');
+}
+
+/** 去掉埠號、方括號，IPv4-mapped IPv6 轉回 IPv4；不是合法 IP 回 null */
+function parseIp(raw: string): string | null {
+  let s = raw.trim();
+  const bracket = /^\[([^\]]+)\](?::\d+)?$/.exec(s);
+  if (bracket) s = bracket[1]!;
+  else if (/^\d{1,3}(\.\d{1,3}){3}:\d+$/.test(s)) s = s.slice(0, s.lastIndexOf(':'));
+  const zone = s.indexOf('%');
+  if (zone >= 0) s = s.slice(0, zone);
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(s);
+  if (mapped) s = mapped[1]!;
+  const v = isIP(s);
+  return v === 0 ? null : s.toLowerCase();
+}
+
+function isTrusted(ip: string): boolean {
+  return TRUSTED.check(ip, isIP(ip) === 6 ? 'ipv6' : 'ipv4');
+}
+
 /**
- * Railway 在 proxy 後面：取 x-forwarded-for 第一段（依需求）。
- * 注意：若 proxy 是「附加」而非「覆寫」這個 header，第一段可由用戶端偽造，限流只能算是盡力而為。
+ * 取用戶端 IP：
+ *  1. X-Forwarded-For 由右往左第一個「合法且非受信任」的 IP
+ *  2. 連線來源位址（remote）
+ *  3. XFF 最右邊的合法 IP（全部都是受信任段時）
  */
-export function clientIp(headers: Headers, fallback?: string): string {
-  const xff = headers.get('x-forwarded-for');
-  const first = xff?.split(',')[0]?.trim();
-  if (first) return first;
-  const real = headers.get('x-real-ip')?.trim();
-  if (real) return real;
-  return fallback || 'unknown';
+export function clientIp(headers: Headers, remote?: string): string {
+  const entries = (headers.get('x-forwarded-for') ?? '')
+    .split(',')
+    .map(parseIp)
+    .filter((ip): ip is string => ip !== null);
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (!isTrusted(entries[i]!)) return entries[i]!;
+  }
+  const r = remote ? parseIp(remote) : null;
+  if (r) return r;
+  return entries[entries.length - 1] ?? 'unknown';
+}
+
+/** 把 IPv6 展開成 8 組 16 進位 */
+function expandIpv6(ip: string): string[] {
+  let s = ip;
+  // 結尾是 IPv4（例如 64:ff9b::1.2.3.4）→ 轉成兩組 16 進位
+  const v4 = /(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+  if (v4) {
+    const [a, b, c, d] = v4.slice(1).map(Number) as [number, number, number, number];
+    s = `${s.slice(0, v4.index)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const [head, tail] = s.split('::') as [string, string | undefined];
+  const h = head ? head.split(':') : [];
+  const t = tail !== undefined && tail !== '' ? tail.split(':') : [];
+  const fill = tail === undefined ? [] : Array(8 - h.length - t.length).fill('0');
+  return [...h, ...fill, ...t].map((x) => (parseInt(x || '0', 16) || 0).toString(16));
+}
+
+/** 限流 key：IPv4 原樣；IPv6 取 /64（同一用戶端常拿到同一個 /64 下的多個位址） */
+export function rateLimitKey(ip: string): string {
+  if (isIP(ip) !== 6) return ip;
+  return `${expandIpv6(ip).slice(0, 4).join(':')}::/64`;
 }

@@ -37,6 +37,31 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  sql-test:
+    name: SQL 測試（真 Postgres：migrations＋狀態轉換＋兩連線併發）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: psql
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y postgresql-client)
+      - name: test:sql
+        run: bash apps/api/test/sql/run.sh
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
   changes:
     name: 判斷部署範圍
     if: github.event_name != 'pull_request'
@@ -67,7 +92,7 @@ jobs:
 
   migrate:
     name: 資料庫 migration（Supabase）
-    needs: [ci, changes]
+    needs: [ci, sql-test, changes]
     if: needs.changes.outputs.db == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -83,9 +108,9 @@ jobs:
 
   deploy-api:
     name: 部署 API（Railway）
-    needs: [ci, changes, migrate]
+    needs: [ci, sql-test, changes, migrate]
     if: >-
-      always() && needs.ci.result == 'success' && needs.changes.result == 'success' &&
+      always() && needs.ci.result == 'success' && needs.sql-test.result == 'success' && needs.changes.result == 'success' &&
       (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') &&
       (needs.changes.outputs.api == 'true' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
@@ -110,9 +135,9 @@ jobs:
 
   deploy-web:
     name: 部署網站（Vercel）
-    needs: [ci, changes, migrate, deploy-api]
+    needs: [ci, sql-test, changes, migrate, deploy-api]
     if: >-
-      always() && needs.ci.result == 'success' && needs.changes.result == 'success' &&
+      always() && needs.ci.result == 'success' && needs.sql-test.result == 'success' && needs.changes.result == 'success' &&
       (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') &&
       (needs.deploy-api.result == 'success' || needs.deploy-api.result == 'skipped') &&
       (needs.changes.outputs.web == 'true' || github.event_name == 'workflow_dispatch')

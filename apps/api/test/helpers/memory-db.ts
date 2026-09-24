@@ -3,14 +3,16 @@ import {
   ACTIVE_STATUSES,
   type AtmIssuedResult,
   type BookingFull,
+  type BookingLimits,
   type BookingPublic,
   type BookingStatus,
   type BusyBooking,
+  type CreateBookingResult,
   type DateOverrideRow,
   type Db,
   type EmailKind,
   type FailedResult,
-  type InsertBookingResult,
+  type FlagResult,
   type NewBooking,
   type NewPayment,
   type PaidResult,
@@ -23,8 +25,21 @@ import {
 } from '../../src/db/types';
 import { generateOrderNo } from '../../src/lib/order-no';
 
-// 測試用記憶體資料庫。狀態轉換邏輯逐行對齊 supabase/migrations/0001_init.sql 的
-// apply_payment_paid / apply_atm_issued / mark_payment_failed / expire_stale_holds。
+// 測試用記憶體資料庫。狀態轉換邏輯逐行對齊 supabase/migrations 的 SQL 函式
+// （0002 取代後的 apply_payment_paid / apply_atm_issued，以及 create_booking / flag_payment_attention /
+//  mark_payment_failed / expire_stale_holds）。真的 SQL 另由 test/sql 在真 Postgres 上驗證。
+
+const TRANSIENT_REASONS = ['payment_pending_review', 'payment_unknown_status', 'linepay_confirm_unknown'];
+// 需與 0003 apply_atm_issued 內的常數一致（test/policy-sync.test.ts 檢查 SQL 與 policy.ts）
+const REISSUE_MAX_PENDING_PER_CUSTOMER = 2;
+const REISSUE_MAX_PENDING_ATM = 5;
+
+/** 對齊 SQL public.normalize_phone */
+export function normalizePhone(phone: string | null | undefined): string {
+  const d = (phone ?? '').replace(/[^0-9]/g, '');
+  return /^886[0-9]{8,9}$/.test(d) ? `0${d.slice(3)}` : d;
+}
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 export interface MemBooking {
   id: string;
@@ -68,6 +83,7 @@ export interface MemPayment {
   paidAt: Date | null;
   raw: Record<string, unknown>;
   createdAt: Date;
+  attentionReason: string | null;
 }
 
 export const SEED_SERVICES: (Service & { active: boolean })[] = [
@@ -153,6 +169,7 @@ export class MemoryDb implements Db {
       paidAt: null,
       raw: {},
       createdAt: this.clock(),
+      attentionReason: null,
       ...p,
     };
     this.payments.push(row);
@@ -177,6 +194,7 @@ export class MemoryDb implements Db {
       atmBankCode: b.atmBankCode,
       atmAccount: b.atmAccount,
       atmExpiresAt: b.atmExpiresAt,
+      needsAttention: b.needsAttention,
       service: { id: s.id, name: s.name, minutes: s.minutes },
     };
   }
@@ -221,11 +239,47 @@ export class MemoryDb implements Db {
     }
     return n;
   }
-  async insertBooking(nb: NewBooking): Promise<InsertBookingResult> {
-    this.calls.push('insertBooking');
+  async createBooking(nb: NewBooking, limits: BookingLimits): Promise<CreateBookingResult> {
+    this.calls.push('createBooking');
+    const now = this.clock();
+    await this.expireStaleHolds({ from: nb.startsAt, to: nb.endsAt });
+    const email = normalizeEmail(nb.email);
+    const phone = normalizePhone(nb.phone);
+    const replaceable = (b: MemBooking) =>
+      (b.status === 'pending_payment' || b.status === 'awaiting_transfer') &&
+      b.startsAt.getTime() === nb.startsAt.getTime() &&
+      normalizeEmail(b.email) === email &&
+      normalizePhone(b.phone) === phone &&
+      !this.payments.some((p) => p.bookingId === b.id && p.status === 'paid');
+    const unpaid = (b: MemBooking) =>
+      (b.status === 'pending_payment' || b.status === 'awaiting_transfer') &&
+      b.holdExpiresAt !== null &&
+      b.holdExpiresAt > now;
+    // 先做完所有檢查（計數排除這次會被取代的舊保留）
+    const mine = this.bookings.filter(
+      (b) => unpaid(b) && !replaceable(b) && (normalizeEmail(b.email) === email || normalizePhone(b.phone) === phone),
+    ).length;
+    if (mine >= limits.maxPendingPerCustomer) return { ok: false, reason: 'too_many_pending' };
+    if (nb.payMethod === 'atm') {
+      const atm = this.bookings.filter(
+        (b) => unpaid(b) && !replaceable(b) && (b.status === 'awaiting_transfer' || b.payMethod === 'atm'),
+      ).length;
+      if (atm >= limits.maxPendingAtm) return { ok: false, reason: 'atm_full' };
+    }
+    // 取消舊保留＋新增：任何衝突都整段回滾（對齊 SQL 的子交易）
+    const toReplace = this.bookings.filter(replaceable);
+    const before = toReplace.map((b) => b.status);
+    for (const b of toReplace) b.status = 'cancelled';
+    const rollback = () => toReplace.forEach((b, i) => (b.status = before[i]!));
     this.beforeInsert?.(nb);
-    if (this.slotConflict(nb.startsAt, nb.endsAt)) return { ok: false, reason: 'slot_taken' };
-    if (this.bookings.some((b) => b.orderNo === nb.orderNo)) return { ok: false, reason: 'order_no_taken' };
+    if (this.slotConflict(nb.startsAt, nb.endsAt)) {
+      rollback();
+      return { ok: false, reason: 'slot_taken' };
+    }
+    if (this.bookings.some((b) => b.orderNo === nb.orderNo)) {
+      rollback();
+      return { ok: false, reason: 'order_no_taken' };
+    }
     const b = this.addBooking({
       orderNo: nb.orderNo,
       serviceId: nb.serviceId,
@@ -243,7 +297,7 @@ export class MemoryDb implements Db {
       email: nb.email,
       questions: nb.questions,
     });
-    return { ok: true, id: b.id };
+    return { ok: true, id: b.id, replaced: toReplace.length };
   }
   async getBookingPublic(orderNo: string) {
     const b = this.booking(orderNo);
@@ -337,6 +391,9 @@ export class MemoryDb implements Db {
       providerTxnId: p.providerTxnId,
       amount: p.amount,
       status: p.status,
+      createdAt: p.createdAt,
+      paymentUrl: (p.raw.request as { paymentUrl?: string } | undefined)?.paymentUrl ?? null,
+      attentionReason: p.attentionReason,
     };
   }
   async getPayment(provider: Provider, tradeNo: string) {
@@ -381,6 +438,20 @@ export class MemoryDb implements Db {
     const ref = { booking_id: bk.id, order_no: bk.orderNo };
     if (pay.status === 'paid') return { result: 'already_paid', ...ref, booking_status: bk.status };
     if (pay.status === 'refunded') return { result: 'ignored', ...ref, booking_status: bk.status };
+    // 同一預約是否還有其他結果不明（已標記）的付款 → 可能重複扣款
+    const other = this.payments.some(
+      (p) => p.bookingId === bk.id && p.id !== pay.id && p.status === 'init' && p.attentionReason !== null,
+    );
+    const clearTransient = () => {
+      const transient = bk.attentionReason !== null && TRANSIENT_REASONS.includes(bk.attentionReason);
+      if (other) {
+        bk.needsAttention = true;
+        if (bk.attentionReason === null || transient) bk.attentionReason = 'possible_duplicate_payment';
+      } else if (transient) {
+        bk.needsAttention = false;
+        bk.attentionReason = null;
+      }
+    };
     if (a.amount !== pay.amount || pay.amount !== bk.amount) {
       bk.needsAttention = true;
       bk.attentionReason = 'amount_mismatch';
@@ -389,6 +460,7 @@ export class MemoryDb implements Db {
     const now = this.clock();
     pay.status = 'paid';
     pay.paidAt = now;
+    pay.attentionReason = null;
     if (bk.status === 'pending_payment' || bk.status === 'awaiting_transfer') {
       bk.status = 'confirmed';
       bk.confirmedAt = now;
@@ -398,9 +470,11 @@ export class MemoryDb implements Db {
         bk.attentionReason = 'paid_after_start';
         return { result: 'needs_attention', reason: 'paid_after_start', ...ref, booking_status: 'confirmed' };
       }
-      return { result: 'confirmed', ...ref, booking_status: 'confirmed' };
+      clearTransient();
+      return { result: 'confirmed', possible_duplicate: other, ...ref, booking_status: 'confirmed' };
     }
     if (bk.status === 'expired' && bk.startsAt > now) {
+      await this.expireStaleHolds({ from: bk.startsAt, to: bk.endsAt });
       if (this.slotConflict(bk.startsAt, bk.endsAt, bk.id)) {
         bk.needsAttention = true;
         bk.attentionReason = 'paid_after_expiry_slot_taken';
@@ -414,7 +488,8 @@ export class MemoryDb implements Db {
       bk.status = 'confirmed';
       bk.confirmedAt = now;
       bk.holdExpiresAt = null;
-      return { result: 'confirmed', reclaimed: true, ...ref, booking_status: 'confirmed' };
+      clearTransient();
+      return { result: 'confirmed', reclaimed: true, possible_duplicate: other, ...ref, booking_status: 'confirmed' };
     }
     const reason =
       bk.status === 'confirmed'
@@ -453,7 +528,8 @@ export class MemoryDb implements Db {
       return { result: 'amount_mismatch', reason: 'amount_mismatch', ...ref, booking_status: bk.status };
     }
     const now = this.clock();
-    if (a.expiresAt <= now) return { result: 'ignored', ...ref, booking_status: bk.status };
+    const hold = new Date(Math.min(a.expiresAt.getTime(), bk.startsAt.getTime() - 24 * 3600_000));
+    if (hold <= now) return { result: 'ignored', ...ref, booking_status: bk.status };
     if (bk.status === 'awaiting_transfer' && bk.atmAccount === a.account) {
       return { result: 'already_issued', ...ref, booking_status: bk.status };
     }
@@ -462,18 +538,57 @@ export class MemoryDb implements Db {
       bk.status === 'awaiting_transfer' ||
       (bk.status === 'expired' && bk.startsAt > now)
     ) {
-      if (bk.status === 'expired' && this.slotConflict(bk.startsAt, bk.endsAt, bk.id)) {
-        return { result: 'slot_taken', ...ref, booking_status: bk.status };
+      if (bk.status === 'expired') {
+        await this.expireStaleHolds({ from: bk.startsAt, to: bk.endsAt });
+        const unpaid = (b: MemBooking) =>
+          b.id !== bk.id &&
+          (b.status === 'pending_payment' || b.status === 'awaiting_transfer') &&
+          b.holdExpiresAt !== null &&
+          b.holdExpiresAt > now;
+        const mine = this.bookings.filter(
+          (b) =>
+            unpaid(b) &&
+            (normalizeEmail(b.email) === normalizeEmail(bk.email) || normalizePhone(b.phone) === normalizePhone(bk.phone)),
+        ).length;
+        const atm = this.bookings.filter((b) => unpaid(b) && (b.status === 'awaiting_transfer' || b.payMethod === 'atm')).length;
+        if (mine >= REISSUE_MAX_PENDING_PER_CUSTOMER || atm >= REISSUE_MAX_PENDING_ATM) {
+          return { result: 'limit_exceeded', ...ref, booking_status: bk.status };
+        }
+        if (this.slotConflict(bk.startsAt, bk.endsAt, bk.id)) {
+          return { result: 'slot_taken', ...ref, booking_status: bk.status };
+        }
       }
       bk.status = 'awaiting_transfer';
       bk.atmBankCode = a.bankCode;
       bk.atmAccount = a.account;
-      bk.atmExpiresAt = a.expiresAt;
-      bk.holdExpiresAt = a.expiresAt;
+      bk.atmExpiresAt = hold;
+      bk.holdExpiresAt = hold;
       bk.transferInfoSentAt = null;
       return { result: 'issued', ...ref, booking_status: 'awaiting_transfer' };
     }
     return { result: 'ignored', ...ref, booking_status: bk.status };
+  }
+
+  async flagPaymentAttention(a: {
+    provider: Provider;
+    tradeNo: string;
+    event: string;
+    raw: Record<string, unknown>;
+    reason: string;
+  }): Promise<FlagResult> {
+    this.calls.push(`flagPaymentAttention:${a.event}`);
+    const pay = this.payments.find((x) => x.provider === a.provider && x.tradeNo === a.tradeNo);
+    if (!pay) return { result: 'not_found' };
+    const bk = this.bookings.find((x) => x.id === pay.bookingId)!;
+    pay.raw = { ...pay.raw, [a.event]: a.raw };
+    const ref = { booking_id: bk.id, order_no: bk.orderNo, booking_status: bk.status };
+    if (pay.status !== 'init') return { result: 'ignored', ...ref };
+    const first = pay.attentionReason === null;
+    pay.attentionReason ??= a.reason;
+    const keep = bk.needsAttention && bk.attentionReason !== null && !TRANSIENT_REASONS.includes(bk.attentionReason);
+    bk.needsAttention = true;
+    if (!keep) bk.attentionReason = a.reason;
+    return { result: first ? 'flagged' : 'already_flagged', ...ref };
   }
 
   async markPaymentFailed(a: {
@@ -486,9 +601,20 @@ export class MemoryDb implements Db {
     const pay = this.payments.find((x) => x.provider === a.provider && x.tradeNo === a.tradeNo);
     if (!pay) return { result: 'not_found' };
     const wasInit = pay.status === 'init';
+    const wasFlagged = pay.attentionReason !== null;
     pay.raw = { ...pay.raw, [a.event]: a.raw };
-    if (wasInit) pay.status = 'failed';
     const bk = this.bookings.find((x) => x.id === pay.bookingId)!;
+    if (wasInit) {
+      pay.status = 'failed';
+      pay.attentionReason = null;
+      const other = this.payments.some(
+        (p) => p.bookingId === bk.id && p.id !== pay.id && p.status === 'init' && p.attentionReason !== null,
+      );
+      if (wasFlagged && !other && bk.attentionReason !== null && TRANSIENT_REASONS.includes(bk.attentionReason)) {
+        bk.needsAttention = false;
+        bk.attentionReason = null;
+      }
+    }
     return { result: wasInit ? 'failed' : 'ignored', booking_id: bk.id, order_no: bk.orderNo };
   }
 }

@@ -5,8 +5,8 @@ import { computeCheckMacValue } from '../../src/lib/ecpay';
 import { LinePayClient } from '../../src/lib/linepay';
 import type { LogFields, Logger } from '../../src/lib/log';
 import type { MailMessage, Mailer, SendResult } from '../../src/lib/mailer';
+import { BOOKING_RATE_LIMIT, PAYMENT_RATE_LIMIT } from '../../src/lib/policy';
 import { FixedWindowRateLimiter } from '../../src/lib/rate-limit';
-import { HOUR_MS } from '../../src/lib/time';
 import { MemoryDb } from './memory-db';
 
 export const ECPAY_TEST = {
@@ -109,7 +109,8 @@ export function makeHarness(
     linepay: env.linepay ? new LinePayClient(env.linepay, (opts.linepayFetch ?? fetch) as typeof fetch) : null,
     logger,
     now: () => clock.now,
-    bookingLimiter: new FixedWindowRateLimiter(10, HOUR_MS, () => clock.now.getTime()),
+    bookingLimiter: new FixedWindowRateLimiter(BOOKING_RATE_LIMIT.limit, BOOKING_RATE_LIMIT.windowMs, () => clock.now.getTime()),
+    paymentLimiter: new FixedWindowRateLimiter(PAYMENT_RATE_LIMIT.limit, PAYMENT_RATE_LIMIT.windowMs, () => clock.now.getTime()),
     defer: (_label, task) => {
       pending.push(task());
     },

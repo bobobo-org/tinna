@@ -11,8 +11,8 @@ import { apiError, readJsonObject } from '../../lib/http';
 import { errorFields } from '../../lib/log';
 import { generateTradeNo, isOrderNo, orderNoFromTradeNo } from '../../lib/order-no';
 import { parseEcpayDateTime } from '../../lib/time';
-import { afterAtmIssued, afterPaid } from '../../services/notify';
-import { checkPayable, itemName, successUrl } from './common';
+import { afterAtmIssued, afterPaid, alertAdmin } from '../../services/notify';
+import { attemptsExceeded, checkPayable, itemName, paymentRateLimited, paymentUnderReview, successUrl } from './common';
 
 // 綠界全方位金流：checkout 產生表單欄位；四個回呼驗簽後交給 SQL 函式做冪等狀態轉換。
 //   notify       ReturnURL（server）         → 回 1|OK
@@ -23,6 +23,27 @@ import { checkPayable, itemName, successUrl } from './common';
 type Verified = { ok: true; params: EcpayParams } | { ok: false; params: EcpayParams; reason: string };
 
 const amountOf = (s: string | undefined): number => (s && /^\d+$/.test(s) ? Number(s) : -1);
+
+/**
+ * 信用卡「確定失敗」的 RtnCode（其餘非 1 的代碼一律視為結果不明 → 人工處理，不標 failed）。
+ * 來源：developers.ecpay.com.tw
+ *  - 付款結果通知（/2878/）「常見交易狀態」：10100248 拒絕交易、10100252 額度不足、10100254 交易失敗（交易限制）、
+ *    10100251 卡片過期、10100255 報失卡、10100256 被盜用卡；10300066「交易付款結果待確認中，請勿出貨」不是失敗
+ *  - 交易狀態代碼表（/5740/）：10100058 Pay fail（3D 驗證失敗）、10800001 觸發風控「表示扣款失敗」、
+ *    10300024 資料驗證錯誤（常見的交易失敗代碼）
+ */
+export const ECPAY_DEFINITE_FAILURES = new Set([
+  '10100058',
+  '10100248',
+  '10100251',
+  '10100252',
+  '10100254',
+  '10100255',
+  '10100256',
+  '10300024',
+  '10800001',
+]);
+export const ECPAY_PENDING_REVIEW = '10300066';
 
 export function ecpayRoutes(deps: AppDeps) {
   const app = new Hono();
@@ -70,9 +91,25 @@ export function ecpayRoutes(deps: AppDeps) {
       deps.logger.warn('payment.atm_notice_ignored', { event, trade_no: tradeNo, rtn_code: params.RtnCode });
       return orderNoFromTradeNo(tradeNo);
     }
-    const r = await deps.db.markPaymentFailed({ provider: 'ecpay', tradeNo, event, raw: params });
-    deps.logger.info('payment.failed', { event, order: r.order_no ?? null, rtn_code: params.RtnCode, result: r.result });
-    return r.order_no ?? orderNoFromTradeNo(tradeNo);
+    if (ECPAY_DEFINITE_FAILURES.has(params.RtnCode ?? '')) {
+      const r = await deps.db.markPaymentFailed({ provider: 'ecpay', tradeNo, event, raw: params });
+      deps.logger.info('payment.failed', { event, order: r.order_no ?? null, rtn_code: params.RtnCode, result: r.result });
+      return r.order_no ?? orderNoFromTradeNo(tradeNo);
+    }
+    // 10300066（待確認）或不認得的代碼：付款結果不明 → 不標 failed，標記人工處理並通知老師
+    const reason = params.RtnCode === ECPAY_PENDING_REVIEW ? 'payment_pending_review' : 'payment_unknown_status';
+    const f = await deps.db.flagPaymentAttention({ provider: 'ecpay', tradeNo, event, raw: params, reason });
+    deps.logger.warn('payment.status_unclear', { event, order: f.order_no ?? null, rtn_code: params.RtnCode, result: f.result });
+    if (f.result === 'flagged') {
+      deps.defer('admin_alert', () =>
+        alertAdmin(deps, {
+          orderNo: f.order_no ?? null,
+          reason,
+          detail: `綠界 RtnCode ${params.RtnCode ?? ''}：${params.RtnMsg ?? ''}（交易編號 ${tradeNo}）`,
+        }),
+      );
+    }
+    return f.order_no ?? orderNoFromTradeNo(tradeNo);
   }
 
   /** ATM 取號結果（atm-info / atm-redirect 共用） */
@@ -113,6 +150,8 @@ export function ecpayRoutes(deps: AppDeps) {
     if (!isOrderNo(orderNo)) {
       return apiError(c, 400, 'validation', '訂單編號不正確', { orderNo: '訂單編號不正確' });
     }
+    const limited = paymentRateLimited(deps, c, orderNo);
+    if (limited) return limited;
     const b = await deps.db.getBookingPublic(orderNo);
     if (!b) return apiError(c, 404, 'not_found', '找不到這筆訂單');
     if (b.payMethod === 'line') {
@@ -121,6 +160,12 @@ export function ecpayRoutes(deps: AppDeps) {
     const now = deps.now();
     const blocked = checkPayable(b, now);
     if (blocked) return apiError(c, blocked.status, blocked.error, blocked.message);
+    const attempts = await deps.db.listBookingPayments(b.id);
+    const underReview = paymentUnderReview(deps, c, orderNo, attempts);
+    if (underReview) return underReview;
+    // 綠界 MerchantTradeNo 不可重複，每次 checkout 都是新的嘗試 → 限制每筆訂單的嘗試次數
+    const exceeded = attemptsExceeded(deps, c, orderNo, attempts.length);
+    if (exceeded) return exceeded;
 
     const method = b.payMethod as Exclude<PayMethod, 'line'>;
     const tradeNo = generateTradeNo(orderNo);

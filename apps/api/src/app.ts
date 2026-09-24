@@ -11,6 +11,9 @@ import { metaRoutes } from './routes/meta';
 import { ecpayRoutes } from './routes/payments/ecpay';
 import { linepayRoutes } from './routes/payments/linepay';
 
+/** 只接受 application/json、且檢查 Origin 的 POST 端點（瀏覽器由前端呼叫的那些） */
+export const JSON_POST_ENDPOINTS = ['/bookings', '/payments/ecpay/checkout', '/payments/linepay/request'];
+
 export function createApp(deps: AppDeps) {
   const app = new Hono();
 
@@ -40,6 +43,14 @@ export function createApp(deps: AppDeps) {
     }),
   );
 
+  // 一律不快取（時段與訂單狀態隨時會變）。
+  // 注意：要在 next() 之前用 c.header() 設定；@hono/node-server 的 lightweight Response
+  // 在 next() 之後直接改 c.res.headers，遇到 cors 的 c.header('Vary') 重建 Response 時會被丟掉。
+  app.use('*', async (c, next) => {
+    c.header('Cache-Control', 'no-store');
+    await next();
+  });
+
   app.use(
     '*',
     bodyLimit({
@@ -48,13 +59,25 @@ export function createApp(deps: AppDeps) {
     }),
   );
 
-  // 一律不快取（時段與訂單狀態隨時會變）。
-  // 注意：要在 next() 之前用 c.header() 設定；@hono/node-server 的 lightweight Response
-  // 在 next() 之後直接改 c.res.headers，遇到 cors 的 c.header('Vary') 重建 Response 時會被丟掉。
-  app.use('*', async (c, next) => {
-    c.header('Cache-Control', 'no-store');
-    await next();
-  });
+  // E. 跨站建單防護：瀏覽器端的 JSON POST 端點
+  //  * Content-Type 必須是 application/json（text/plain 等「簡單請求」不會觸發 CORS 預檢，任何網站都能送）→ 否則 415
+  //  * 有 Origin 且不在 WEB_URL 白名單 → 403
+  //  綠界／LINE Pay 回呼（form POST、GET 導回）不在這裡，不受影響
+  for (const path of JSON_POST_ENDPOINTS) {
+    app.use(path, async (c, next) => {
+      if (c.req.method !== 'POST') return next();
+      const type = (c.req.header('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+      if (type !== 'application/json') {
+        return apiError(c, 415, 'unsupported_media_type', '請以 JSON 格式送出（Content-Type: application/json）');
+      }
+      const origin = c.req.header('origin');
+      if (origin !== undefined && !deps.env.webOrigins.includes(origin)) {
+        deps.logger.warn('http.forbidden_origin', { path: c.req.path });
+        return apiError(c, 403, 'forbidden_origin', '不允許從這個網站送出');
+      }
+      return next();
+    });
+  }
 
   app.route('/', metaRoutes(deps));
   app.route('/', availabilityRoutes(deps));

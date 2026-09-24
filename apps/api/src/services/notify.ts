@@ -58,12 +58,17 @@ export function afterPaid(
   const base = { order: r.order_no ?? null, provider: ctx.provider, event: ctx.event, trade_no: ctx.tradeNo };
   switch (r.result) {
     case 'confirmed': {
-      deps.logger.info('payment.confirmed', { ...base, reclaimed: !!r.reclaimed });
+      deps.logger.info('payment.confirmed', { ...base, reclaimed: !!r.reclaimed, possible_duplicate: !!r.possible_duplicate });
       const id = r.booking_id!;
       deps.defer('confirmation_email', async () => {
         await sendConfirmation(deps, id);
         await notifyAdminNewOrder(deps, id);
       });
+      if (r.possible_duplicate) {
+        deps.defer('admin_alert', () =>
+          alertAdmin(deps, { orderNo: r.order_no ?? null, reason: 'possible_duplicate_payment' }),
+        );
+      }
       return;
     }
     case 'already_paid':
@@ -110,6 +115,10 @@ export function afterAtmIssued(deps: Deps, r: AtmIssuedResult, ctx: { tradeNo: s
       return;
     case 'slot_taken':
       deps.logger.warn('payment.atm_slot_taken', base);
+      return;
+    case 'limit_exceeded':
+      // 逾時後才取號、但未付款上限已滿：不恢復保留（若之後入帳，會走付款成功的補確認流程）
+      deps.logger.warn('payment.atm_limit_exceeded', base);
       return;
     case 'amount_mismatch':
       deps.logger.warn('payment.needs_attention', { ...base, reason: 'amount_mismatch' });

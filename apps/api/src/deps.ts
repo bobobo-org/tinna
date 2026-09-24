@@ -12,7 +12,10 @@ export interface AppDeps {
   linepay: LinePayClient | null;
   logger: Logger;
   now: () => Date;
+  /** POST /bookings：每個 IP */
   bookingLimiter: FixedWindowRateLimiter;
+  /** 付款端點：每個「IP＋訂單編號」 */
+  paymentLimiter: FixedWindowRateLimiter;
   /** 回應後才做的事（寄信）；失敗只記 log。測試會換成可 await 的版本。 */
   defer: (label: string, task: () => Promise<void>) => void;
 }

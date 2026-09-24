@@ -54,6 +54,27 @@ async function recordPaid(
   return null;
 }
 
+/**
+ * 付款結果不明：標在這次付款與預約上（needsAttention），第一次標記時通知老師（之後重試不再重複通知）。
+ * 付款之後有了結果（成功／確定失敗）會由 SQL 自動解除標記。
+ */
+async function flagUnknown(deps: Deps, payment: PaymentRow, event: string, raw: Record<string, unknown>, detail: string) {
+  const orderNo = orderNoFromTradeNo(payment.tradeNo);
+  try {
+    const f = await deps.db.flagPaymentAttention({
+      provider: 'linepay',
+      tradeNo: payment.tradeNo,
+      event: `${event}_unknown`,
+      raw,
+      reason: 'linepay_confirm_unknown',
+    });
+    if (f.result !== 'flagged') return;
+  } catch (e) {
+    deps.logger.error('linepay.flag_failed', { order: orderNo, ...errorFields(e) });
+  }
+  deps.defer('admin_alert', () => alertAdmin(deps, { orderNo, reason: 'linepay_confirm_unknown', detail }));
+}
+
 /** 這筆預約現在還能不能確認（不能就不要 Confirm，免得扣款後還要退款） */
 async function isConfirmable(deps: Deps, payment: PaymentRow): Promise<{ ok: boolean; reason?: string }> {
   const orderNo = orderNoFromTradeNo(payment.tradeNo);
@@ -99,15 +120,8 @@ export async function confirmLinePay(
     res = await client.confirmPayment(transactionId, payment.amount);
   } catch (e) {
     deps.logger.error('linepay.confirm_error', { order: orderNo, event, ...errorFields(e) });
-    if (event === 'confirm') {
-      deps.defer('admin_alert', () =>
-        alertAdmin(deps, {
-          orderNo,
-          reason: 'linepay_confirm_unknown',
-          detail: `Confirm 無回應，背景對帳會每 5 分鐘查詢（transactionId ${transactionId}）`,
-        }),
-      );
-    }
+    await flagUnknown(deps, payment, event, { error: (e as Error).name },
+      `Confirm 無回應，背景對帳會每 5 分鐘查詢（transactionId ${transactionId}）`);
     return 'unknown';
   }
 
@@ -127,6 +141,8 @@ export async function confirmLinePay(
     status = (await client.checkRequestStatus(transactionId)).returnCode;
   } catch (e) {
     deps.logger.error('linepay.check_error', { order: orderNo, ...errorFields(e) });
+    await flagUnknown(deps, payment, event, { returnCode: res.returnCode, check: 'error' },
+      `Confirm 回 ${res.returnCode}，查詢交易狀態失敗，背景對帳會繼續查詢（transactionId ${transactionId}）`);
     return 'unknown';
   }
   if (status === LINEPAY_STATUS.completed) {
@@ -135,19 +151,23 @@ export async function confirmLinePay(
     afterPaid(deps, r, { provider: 'linepay', tradeNo: payment.tradeNo, event });
     return 'paid';
   }
-  if (status === LINEPAY_STATUS.authorized || status === LINEPAY_STATUS.waiting) {
-    // 還沒扣款但也還沒結束：維持 init，背景對帳（24 小時內每 5 分鐘）再試
-    deps.logger.warn('linepay.confirm_retry_later', { order: orderNo, return_code: res.returnCode, check: status });
-    return 'unknown';
+  // 只有 0121（取消／逾時）與 0122（付款失敗）是確定失敗
+  if (status === LINEPAY_STATUS.cancelled || status === LINEPAY_STATUS.failed) {
+    const f = await deps.db.markPaymentFailed({
+      provider: 'linepay',
+      tradeNo: payment.tradeNo,
+      event,
+      raw: { returnCode: res.returnCode, returnMessage: res.returnMessage, check: status },
+    });
+    deps.logger.warn('linepay.confirm_failed', { order: orderNo, return_code: res.returnCode, check: status, result: f.result });
+    return 'failed';
   }
-  const f = await deps.db.markPaymentFailed({
-    provider: 'linepay',
-    tradeNo: payment.tradeNo,
-    event,
-    raw: { returnCode: res.returnCode, returnMessage: res.returnMessage, check: status },
-  });
-  deps.logger.warn('linepay.confirm_failed', { order: orderNo, return_code: res.returnCode, check: status, result: f.result });
-  return 'failed';
+  // 0110／0000（還沒扣款也還沒結束）或其他代碼（1104、1105、9000…狀態不明）
+  // → 維持 init 交給背景對帳（24 小時內每 5 分鐘），標記人工處理並通知老師（只通知一次）
+  deps.logger.warn('linepay.confirm_retry_later', { order: orderNo, return_code: res.returnCode, check: status });
+  await flagUnknown(deps, payment, event, { returnCode: res.returnCode, returnMessage: res.returnMessage, check: status },
+    `Confirm 回 ${res.returnCode}、查詢交易狀態回 ${status}，背景對帳會繼續處理（transactionId ${transactionId}）`);
+  return 'unknown';
 }
 
 export type PendingOutcome = 'paid' | 'open' | 'closed' | 'unknown';
@@ -182,7 +202,10 @@ export async function resolvePendingLinePay(deps: Deps, p: PaymentRow): Promise<
     await deps.db.markPaymentFailed({ provider: 'linepay', tradeNo: p.tradeNo, event: 'reconcile', raw: { check: code } });
     return 'closed';
   }
-  return 'open';
+  if (code === LINEPAY_STATUS.waiting) return 'open'; // 使用者還沒在 LINE Pay 完成付款
+  deps.logger.warn('linepay.check_unknown', { trade_no: p.tradeNo, check: code }); // 1104、9000… 狀態不明
+  await flagUnknown(deps, p, 'reconcile', { check: code }, `查詢交易狀態回 ${code}（transactionId ${txId}）`);
+  return 'unknown';
 }
 
 /** 背景對帳：24 小時內仍是 init、已取得 transactionId 的 LINE Pay 付款 */

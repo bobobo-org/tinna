@@ -4,13 +4,15 @@ import {
   ACTIVE_STATUSES,
   type AtmIssuedResult,
   type BookingFull,
+  type BookingLimits,
   type BookingPublic,
   type BusyBooking,
+  type CreateBookingResult,
   type DateOverrideRow,
   type Db,
   type EmailKind,
   type FailedResult,
-  type InsertBookingResult,
+  type FlagResult,
   type NewBooking,
   type NewPayment,
   type PaidResult,
@@ -45,7 +47,10 @@ function fail(op: string, err: PgErr): never {
 const toDate = (v: string | null | undefined): Date | null => (v ? new Date(v) : null);
 
 const PUBLIC_COLUMNS =
-  'id,order_no,status,pay_method,amount,starts_at,ends_at,hold_expires_at,atm_bank_code,atm_account,atm_expires_at,service:services(id,name,minutes)';
+  'id,order_no,status,pay_method,amount,starts_at,ends_at,hold_expires_at,atm_bank_code,atm_account,atm_expires_at,needs_attention,service:services(id,name,minutes)';
+
+const PAYMENT_COLUMNS =
+  'id,booking_id,provider,method,provider_trade_no,provider_txn_id,amount,status,created_at,attention_reason,payment_url:raw->request->>paymentUrl';
 
 // 未產生 Supabase 型別檔；欄位在 map* 函式集中轉換
 type Row = any;
@@ -63,6 +68,7 @@ function mapPublic(r: Row): BookingPublic {
     atmBankCode: r.atm_bank_code ?? null,
     atmAccount: r.atm_account ?? null,
     atmExpiresAt: toDate(r.atm_expires_at),
+    needsAttention: !!r.needs_attention,
     service: { id: r.service?.id, name: r.service?.name, minutes: r.service?.minutes },
   };
 }
@@ -77,6 +83,9 @@ function mapPayment(r: Row): PaymentRow {
     providerTxnId: r.provider_txn_id ?? null,
     amount: r.amount,
     status: r.status,
+    createdAt: new Date(r.created_at),
+    paymentUrl: r.payment_url ?? null,
+    attentionReason: r.attention_reason ?? null,
   };
 }
 
@@ -164,40 +173,33 @@ export class SupabaseDb implements Db {
     return typeof data === 'number' ? data : Number(data ?? 0);
   }
 
-  async insertBooking(b: NewBooking): Promise<InsertBookingResult> {
-    const { data, error } = await this.sb
-      .from('bookings')
-      .insert({
-        order_no: b.orderNo,
-        service_id: b.serviceId,
-        starts_at: b.startsAt.toISOString(),
-        ends_at: b.endsAt.toISOString(),
-        status: 'pending_payment',
-        pay_method: b.payMethod,
-        amount: b.amount,
-        hold_expires_at: b.holdExpiresAt.toISOString(),
-        customer_name: b.customerName,
-        gender: b.gender,
-        birth_date: b.birthDate,
-        birth_time: b.birthTime,
-        birth_place: b.birthPlace,
-        phone: b.phone,
-        email: b.email,
-        questions: b.questions,
-      })
-      .select('id')
-      .single();
-    if (error) {
-      const msg = `${error.message ?? ''}`;
-      // 23505：同一開始時間（bookings_slot_unique）；23P01：時間區間重疊（bookings_no_overlap）
-      if (error.code === '23P01') return { ok: false, reason: 'slot_taken' };
-      if (error.code === '23505') {
-        if (msg.includes('bookings_slot_unique')) return { ok: false, reason: 'slot_taken' };
-        if (msg.includes('bookings_order_no_unique')) return { ok: false, reason: 'order_no_taken' };
-      }
-      fail('insertBooking', error);
+  async createBooking(b: NewBooking, limits: BookingLimits): Promise<CreateBookingResult> {
+    const { data, error } = await this.sb.rpc('create_booking', {
+      p_order_no: b.orderNo,
+      p_service_id: b.serviceId,
+      p_starts_at: b.startsAt.toISOString(),
+      p_ends_at: b.endsAt.toISOString(),
+      p_pay_method: b.payMethod,
+      p_amount: b.amount,
+      p_hold_expires_at: b.holdExpiresAt.toISOString(),
+      p_customer_name: b.customerName,
+      p_gender: b.gender,
+      p_birth_date: b.birthDate,
+      p_birth_time: b.birthTime,
+      p_birth_place: b.birthPlace,
+      p_phone: b.phone,
+      p_email: b.email,
+      p_questions: b.questions,
+      p_max_pending_per_customer: limits.maxPendingPerCustomer,
+      p_max_pending_atm: limits.maxPendingAtm,
+    });
+    if (error) fail('createBooking', error);
+    const r = data as { result: string; id?: string; replaced?: number };
+    if (r.result === 'created' && r.id) return { ok: true, id: r.id, replaced: r.replaced ?? 0 };
+    if (r.result === 'slot_taken' || r.result === 'order_no_taken' || r.result === 'too_many_pending' || r.result === 'atm_full') {
+      return { ok: false, reason: r.result };
     }
-    return { ok: true, id: (data as Row).id };
+    throw new DbError('createBooking', undefined, `unexpected result ${String(r.result)}`);
   }
 
   async getBookingPublic(orderNo: string): Promise<BookingPublic | null> {
@@ -306,7 +308,7 @@ export class SupabaseDb implements Db {
         status: 'init',
         raw: p.raw,
       })
-      .select('id,booking_id,provider,method,provider_trade_no,provider_txn_id,amount,status')
+      .select(PAYMENT_COLUMNS)
       .single();
     if (error) fail('insertPayment', error);
     return mapPayment(data);
@@ -315,7 +317,7 @@ export class SupabaseDb implements Db {
   async getPayment(provider: Provider, tradeNo: string): Promise<PaymentRow | null> {
     const { data, error } = await this.sb
       .from('payments')
-      .select('id,booking_id,provider,method,provider_trade_no,provider_txn_id,amount,status')
+      .select(PAYMENT_COLUMNS)
       .eq('provider', provider)
       .eq('provider_trade_no', tradeNo)
       .maybeSingle();
@@ -326,7 +328,7 @@ export class SupabaseDb implements Db {
   async listBookingPayments(bookingId: string): Promise<PaymentRow[]> {
     const { data, error } = await this.sb
       .from('payments')
-      .select('id,booking_id,provider,method,provider_trade_no,provider_txn_id,amount,status')
+      .select(PAYMENT_COLUMNS)
       .eq('booking_id', bookingId)
       .order('created_at');
     if (error) fail('listBookingPayments', error);
@@ -336,7 +338,7 @@ export class SupabaseDb implements Db {
   async listPendingLinePay(createdAfter: Date, createdBefore: Date): Promise<PaymentRow[]> {
     const { data, error } = await this.sb
       .from('payments')
-      .select('id,booking_id,provider,method,provider_trade_no,provider_txn_id,amount,status')
+      .select(PAYMENT_COLUMNS)
       .eq('provider', 'linepay')
       .eq('status', 'init')
       .not('provider_txn_id', 'is', null)
@@ -397,6 +399,24 @@ export class SupabaseDb implements Db {
     });
     if (error) fail('applyAtmIssued', error);
     return data as AtmIssuedResult;
+  }
+
+  async flagPaymentAttention(args: {
+    provider: Provider;
+    tradeNo: string;
+    event: string;
+    raw: Record<string, unknown>;
+    reason: string;
+  }): Promise<FlagResult> {
+    const { data, error } = await this.sb.rpc('flag_payment_attention', {
+      p_provider: args.provider,
+      p_trade_no: args.tradeNo,
+      p_event: args.event,
+      p_raw: args.raw,
+      p_reason: args.reason,
+    });
+    if (error) fail('flagPaymentAttention', error);
+    return data as FlagResult;
   }
 
   async markPaymentFailed(args: {

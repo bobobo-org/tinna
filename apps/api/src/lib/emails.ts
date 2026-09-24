@@ -22,6 +22,9 @@ export const ATTENTION_LABEL: Record<string, string> = {
   duplicate_payment: '同一筆預約重複付款（需退款其中一筆）',
   unknown_trade: '收到無法對應訂單的付款通知',
   linepay_confirm_unknown: 'LINE Pay 付款確認結果不明，請到 LINE Pay 商家後台確認',
+  payment_pending_review: '綠界回報「交易付款結果待確認中」（10300066），請到綠界廠商後台確認是否已付款',
+  payment_unknown_status: '綠界回報無法辨識的交易狀態，請到綠界廠商後台確認是否已付款',
+  possible_duplicate_payment: '預約已確認，但同一筆訂單還有另一次付款結果不明，可能重複扣款，請到金流後台確認',
 };
 
 const RESCHEDULE_RULE = '諮詢前 48 小時可免費改期一次；48 小時內取消恕不退款，但可轉讓給親友使用。';

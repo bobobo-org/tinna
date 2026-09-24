@@ -71,6 +71,7 @@ export interface BookingPublic {
   atmBankCode: string | null;
   atmAccount: string | null;
   atmExpiresAt: Date | null;
+  needsAttention: boolean;
   service: { id: string; name: string; minutes: number };
 }
 
@@ -102,6 +103,11 @@ export interface PaymentRow {
   providerTxnId: string | null;
   amount: number;
   status: PaymentStatus;
+  createdAt: Date;
+  /** LINE Pay 付款網址（request 成功時存在 raw.request.paymentUrl），沿用未完成的嘗試用 */
+  paymentUrl: string | null;
+  /** 這次付款引起的異常標記（結果不明）；有值且 status=init 時不可再開新的付款 */
+  attentionReason: string | null;
 }
 
 export interface NewPayment {
@@ -118,6 +124,8 @@ export interface PaidResult {
   result: 'not_found' | 'already_paid' | 'ignored' | 'amount_mismatch' | 'confirmed' | 'needs_attention';
   reason?: string;
   reclaimed?: boolean;
+  /** 確認了，但同一預約還有其他結果不明的付款（可能重複扣款） */
+  possible_duplicate?: boolean;
   booking_id?: string;
   order_no?: string;
   booking_status?: BookingStatus;
@@ -125,8 +133,16 @@ export interface PaidResult {
 
 /** apply_atm_issued 的回傳 */
 export interface AtmIssuedResult {
-  result: 'not_found' | 'ignored' | 'amount_mismatch' | 'issued' | 'already_issued' | 'slot_taken';
+  result: 'not_found' | 'ignored' | 'amount_mismatch' | 'issued' | 'already_issued' | 'slot_taken' | 'limit_exceeded';
   reason?: string;
+  booking_id?: string;
+  order_no?: string;
+  booking_status?: BookingStatus;
+}
+
+/** flag_payment_attention 的回傳 */
+export interface FlagResult {
+  result: 'not_found' | 'ignored' | 'flagged' | 'already_flagged';
   booking_id?: string;
   order_no?: string;
   booking_status?: BookingStatus;
@@ -141,9 +157,14 @@ export interface FailedResult {
 
 export type EmailKind = 'confirmation' | 'transfer_info' | 'admin_new_order';
 
-export type InsertBookingResult =
-  | { ok: true; id: string }
-  | { ok: false; reason: 'slot_taken' | 'order_no_taken' };
+export interface BookingLimits {
+  maxPendingPerCustomer: number;
+  maxPendingAtm: number;
+}
+
+export type CreateBookingResult =
+  | { ok: true; id: string; replaced: number }
+  | { ok: false; reason: 'slot_taken' | 'order_no_taken' | 'too_many_pending' | 'atm_full' };
 
 export interface Db {
   listActiveServices(): Promise<Service[]>;
@@ -154,7 +175,11 @@ export interface Db {
   listBusyBookings(from: Date, to: Date): Promise<BusyBooking[]>;
   /** 逾時保留 → expired；有給區間時只處理與 [from, to) 重疊的預約；回傳筆數 */
   expireStaleHolds(range?: { from: Date; to: Date }): Promise<number>;
-  insertBooking(b: NewBooking): Promise<InsertBookingResult>;
+  /**
+   * 建立預約（SQL create_booking，單一交易＋advisory lock）：釋出重疊的過期保留 → 取消同一人同時段的舊保留
+   * → 檢查同一顧客未付款上限、全站未付款 ATM 上限 → insert
+   */
+  createBooking(b: NewBooking, limits: BookingLimits): Promise<CreateBookingResult>;
   getBookingPublic(orderNo: string): Promise<BookingPublic | null>;
   getBookingFull(id: string): Promise<BookingFull | null>;
   markEmailSent(bookingId: string, kind: EmailKind): Promise<void>;
@@ -190,6 +215,13 @@ export interface Db {
     event: string;
     raw: Record<string, unknown>;
   }): Promise<AtmIssuedResult>;
+  flagPaymentAttention(args: {
+    provider: Provider;
+    tradeNo: string;
+    event: string;
+    raw: Record<string, unknown>;
+    reason: string;
+  }): Promise<FlagResult>;
   markPaymentFailed(args: {
     provider: Provider;
     tradeNo: string;
