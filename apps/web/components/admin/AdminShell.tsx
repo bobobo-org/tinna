@@ -13,6 +13,7 @@ export const ADMIN_NAV = [
   { href: '/admin/bookings', label: '預約' },
   { href: '/admin/vip', label: 'VIP' },
   { href: '/admin/orders', label: '訂單' },
+  { href: '/admin/products', label: '商品' },
   { href: '/admin/referrals', label: '推薦碼' },
 ] as const;
 

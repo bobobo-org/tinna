@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import GiftSender from '@/components/admin/GiftSender';
 import { Badge, Card, Empty, Notice, btnGhost, btnPrimary, inputSm, labelSm } from '@/components/admin/ui';
 import { ApiError } from '@/lib/api';
 import {
@@ -27,6 +28,7 @@ function MemberEditor({ member, onSaved }: { member: AdminVipMember; onSaved: (m
   const [expiresOn, setExpiresOn] = useState(member.expiresOn);
   const [note, setNote] = useState(member.note ?? '');
   const [bookings, setBookings] = useState<AdminVipBooking[] | null>(null);
+  const [gift, setGift] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
@@ -98,12 +100,18 @@ function MemberEditor({ member, onSaved }: { member: AdminVipMember; onSaved: (m
           備註（只有後台看得到，例：生日禮已寄出）
           <textarea value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} rows={2} className={inputSm} />
         </label>
-        <div>
+        <div className="flex flex-wrap gap-2">
           <button type="submit" disabled={busy} className={btnPrimary}>
             {busy ? '儲存中…' : '儲存'}
           </button>
+          {!gift && (
+            <button type="button" onClick={() => setGift(true)} className={btnGhost}>
+              寄贈品／生日禮
+            </button>
+          )}
         </div>
       </form>
+      {gift && <GiftSender member={member} onClose={() => setGift(false)} />}
       <div className="flex flex-col gap-2">
         <h3 className="text-[14px] font-bold text-ink-700">VIP 預約紀錄</h3>
         {bookings === null && <p className="text-[13px] text-ink-500">讀取中…</p>}

@@ -10,11 +10,14 @@ export function pageMetadata({
   description,
   path,
   noindex = false,
+  image,
 }: {
   title: string;
   description: string;
   path: string;
   noindex?: boolean;
+  /** 分享圖（例：商品照片）；沒給用全站分享卡 */
+  image?: { url: string; alt: string };
 }): Metadata {
   return {
     title,
@@ -28,21 +31,23 @@ export function pageMetadata({
       title: `${title}｜${SITE_NAME}`,
       description,
       // 子頁的 openGraph 會整包蓋掉 root，app/opengraph-image.png 不會自動繼承，要明寫
-      images: [
-        {
-          url: '/opengraph-image.png',
-          width: 1200,
-          height: 630,
-          alt: '緣舍命理分享卡：粉色緞面背景搭配珍珠圓標誌，標語「問一個人的命・答一段路的解」',
-        },
-      ],
+      images: image
+        ? [image]
+        : [
+            {
+              url: '/opengraph-image.png',
+              width: 1200,
+              height: 630,
+              alt: '緣舍命理分享卡：粉色緞面背景搭配珍珠圓標誌，標語「問一個人的命・答一段路的解」',
+            },
+          ],
     },
     // 分享到 X（Twitter）也用大圖卡片
     twitter: {
       card: 'summary_large_image',
       title: `${title}｜${SITE_NAME}`,
       description,
-      images: ['/twitter-image.png'],
+      images: [image?.url ?? '/twitter-image.png'],
     },
     ...(noindex ? { robots: { index: false, follow: true } } : {}),
   };

@@ -7,6 +7,7 @@ import { ApiError, MSG_NETWORK, api } from '@/lib/api';
 import { goToOrderPayment } from '@/lib/booking/pay';
 import { taipeiClock } from '@/lib/booking/time';
 import { formatPrice } from '@/lib/services';
+import { clearCartForOrder } from '@/lib/shop';
 import { bookingHref } from '@/lib/site';
 import { slashDate, type PublicOrder } from '@/lib/vip';
 
@@ -106,6 +107,11 @@ export default function OrderResult({ orderNo: rawOrderNo }: { orderNo: string }
   const o = view.kind === 'order' ? view.o : null;
   const polling = o?.status === 'pending_payment' && polls < POLL_MAX;
 
+  // 商店訂單付款完成：清空下這筆單的購物車
+  useEffect(() => {
+    if (o?.kind === 'shop' && o.status !== 'pending_payment' && o.status !== 'expired' && o.status !== 'cancelled') clearCartForOrder(o.orderNo);
+  }, [o]);
+
   useEffect(() => {
     if (!polling) return;
     const t = window.setTimeout(() => {
@@ -150,7 +156,7 @@ export default function OrderResult({ orderNo: rawOrderNo }: { orderNo: string }
   let title = '';
   let sub = '';
   const isVip = o?.kind === 'vip';
-  const again = isVip ? { href: '/vip', label: '重新選購 VIP' } : null;
+  const again = isVip ? { href: '/vip', label: '重新選購 VIP' } : { href: '/shop/cart', label: '回購物車' };
   if (view.kind === 'loading') {
     mark = '…';
     title = '查詢訂單中…';
@@ -231,6 +237,11 @@ export default function OrderResult({ orderNo: rawOrderNo }: { orderNo: string }
             {paid && isVip && (
               <Link href={bookingHref('vip')} className={primaryBtn}>
                 用 VIP 堂數預約
+              </Link>
+            )}
+            {paid && !isVip && (
+              <Link href="/shop" className={primaryBtn}>
+                繼續購物
               </Link>
             )}
             {o?.status === 'pending_payment' && (

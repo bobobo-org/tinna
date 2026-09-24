@@ -251,3 +251,33 @@ VIP 購買（之後的商店也一樣）走 `orders`：建立訂單 → 綠界�
 - `GET /admin/orders?kind=vip,shop,gift&status=…&from=&to=`（依下單時間，預設最近 60 天）→ `{ from, to, orders: [{ orderNo, kind, status, subtotal, shippingFee, discountAmount, amount, items, customer: { name, email, phone, birthDate }, shipping, note, vipPlanId, vipMemberId, trackingNo, createdAt, paidAt, shippedAt }] }`
 - `PATCH /admin/orders/:orderNo { status?: "shipped | completed | cancelled", trackingNo?, note? }`：出貨時寄出貨通知信；VIP 訂單不能出貨；未付款不能出貨；付款狀態只由金流更新；取消不會自動退款
 
+## 商店與 VIP 贈品
+
+### `GET /shop/products`（公開）
+`200 { "products": [{ "id", "slug", "name", "description", "price", "images": ["https://…"], "stock" }], "shippingFee": 100, "freeShippingOver": 2000 | null }`（只回上架販售中的商品，依 `sort`、新到舊）
+
+### `GET /shop/products/:slug`（公開）
+`200 { "product": {…同上}, "shippingFee", "freeShippingOver" }`；下架、只當贈品、不存在 → `404 not_found`
+
+### `POST /shop/orders`
+```json
+{
+  "items": [{ "product_id": "uuid", "qty": 2 }],
+  "name": "陳先生", "email": "a@b.co", "phone": "0911222333",
+  "ship_name": "陳先生", "ship_phone": "0911222333", "ship_address": "台北市信義區松仁路 1 號",
+  "note": "", "referral_code": "", "agree": true
+}
+```
+- 價格、庫存一律以 DB 為準：商品下架／只當贈品／不存在 →「購物車裡有商品已下架，請重新整理購物車」；庫存不足 →「「水晶手鍊」庫存只剩 1 件」／「「水晶手鍊」已售完，請從購物車移除」（都是 `400 validation`，`fields.items`）
+- 運費：商品小計（折扣前）≥ `freeShippingOver` 免運，否則 `shippingFee`；推薦碼（`kind = shop`）只折商品金額、不折運費
+- `agree` 必須為 `true`（`fields.agree`「請勾選同意購物與退換貨規則」）；地址至少 6 個字
+- `201 { "orderNo", "amount" }` → 接著呼叫 `POST /payments/ecpay/order-checkout`（同 VIP）；付款成功才扣庫存，寄訂單確認信給客人、新訂單通知給老師
+
+### 後台
+- `GET /admin/products` → `{ products: [{ id, slug, name, description, price, images, stock, forSale, active, sort, createdAt }] }`（含下架與只當贈品的）
+- `POST /admin/products { name, price, slug?, description?, images?, stock?, forSale?, active?, sort? }`：`slug` 不填自動產生 `p-xxxxxxxx`；重複 `409 duplicate`；`forSale = true` 時價格至少 1 元；圖片最多 8 張、必須是 https
+- `PATCH /admin/products/:id`（同上欄位皆選填）
+- `POST /admin/uploads`：body 是圖片本身（`Content-Type: image/jpeg | image/png | image/webp | image/gif`，最多 5MB，會檢查檔頭）→ `201 { "url" }`（Supabase Storage 公開 bucket `products`，第一次上傳時自動建立）；格式不對 `415`、太大 `413`、上傳失敗 `502`
+- `GET /admin/settings` → `{ shippingFee, freeShippingOver }`；`PATCH /admin/settings { shippingFee?, freeShippingOver? }`（`freeShippingOver: null` ＝不提供滿額免運）
+- `POST /admin/gifts { memberId, items: [{ productId, qty }], shipName, shipPhone, shipAddress, note? }`：建立 `kind = gift` 的訂單（金額 0、狀態 `paid`＝待出貨），立即扣庫存（`consume_order_stock`）；「只當贈品」的商品也可以選。之後用 `PATCH /admin/orders/:orderNo` 出貨，會寄「VIP 贈品已寄出」通知信（不顯示價格）
+

@@ -79,10 +79,11 @@ export default function Nav() {
                 key={item.href}
                 href={item.href}
                 aria-current={on ? 'page' : undefined}
-                className="group -my-1 block py-1 focus-visible:outline-none"
+                // 桌機窄版（760–900px）放不下 6 個項目：先藏「首頁」（Logo 本身就連回首頁）
+                className={`group -my-1 py-1 focus-visible:outline-none ${item.href === '/' ? 'hidden min-[900px]:block' : 'block'}`}
               >
                 <span
-                  className={`block rounded-pill px-3 py-2 text-[15px] font-medium group-hover:bg-white/70 group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-rose-600 ${
+                  className={`block rounded-pill px-[10px] py-2 text-[14px] font-medium min-[1000px]:px-3 min-[1000px]:text-[15px] group-hover:bg-white/70 group-focus-visible:outline group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-rose-600 ${
                     on ? 'bg-white/75 text-rose-800' : 'text-ink-600'
                   }`}
                 >

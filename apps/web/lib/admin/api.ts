@@ -8,7 +8,10 @@ import { clearSession, getSession } from './session';
 
 export type AdminMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
-export async function adminRequest<T>(path: string, opts: { method?: AdminMethod; body?: unknown; timeoutMs?: number } = {}): Promise<T> {
+export async function adminRequest<T>(
+  path: string,
+  opts: { method?: AdminMethod; body?: unknown; timeoutMs?: number; raw?: { data: Blob; type: string } } = {},
+): Promise<T> {
   const base = normalizeBase(process.env.NEXT_PUBLIC_API_URL);
   if (!base) throw new ApiError(0, 'not_configured', MSG_NOT_CONFIGURED);
   const session = await getSession();
@@ -27,9 +30,9 @@ export async function adminRequest<T>(path: string, opts: { method?: AdminMethod
       headers: {
         Accept: 'application/json',
         Authorization: `Bearer ${session.accessToken}`,
-        ...(opts.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(opts.raw ? { 'Content-Type': opts.raw.type } : opts.body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      body: opts.raw ? opts.raw.data : opts.body === undefined ? undefined : JSON.stringify(opts.body),
       signal: ctrl.signal,
       cache: 'no-store',
       credentials: 'omit',
@@ -252,3 +255,33 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   cancelled: '已取消',
   expired: '已逾時',
 };
+
+// ---------- 商店商品、運費 ----------
+
+export interface AdminProduct {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  price: number;
+  images: string[];
+  stock: number;
+  /** 在商店販售（false：只當 VIP 贈品） */
+  forSale: boolean;
+  /** 啟用（false：下架，商店與贈品都不能選） */
+  active: boolean;
+  sort: number;
+  createdAt: string;
+}
+
+export interface ShopSettings {
+  shippingFee: number;
+  freeShippingOver: number | null;
+}
+
+/** 上傳商品圖片（POST /admin/uploads，body 是圖片本身）→ 公開網址 */
+export async function adminUpload(file: Blob): Promise<string> {
+  const r = await adminRequest<{ url: string }>('/admin/uploads', { method: 'POST', raw: { data: file, type: file.type }, timeoutMs: 60_000 });
+  return r.url;
+}
+

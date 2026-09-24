@@ -87,6 +87,28 @@ export function servicesLd(services: Service[]): Json {
   };
 }
 
+/** 商店商品（價格、庫存） */
+export function productLd(p: { slug: string; name: string; description: string | null; price: number; images: string[]; stock: number }): Json {
+  const url = abs(`/shop/${p.slug}`);
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: p.name,
+    ...(p.description ? { description: p.description } : {}),
+    ...(p.images.length > 0 ? { image: p.images } : {}),
+    url,
+    brand: { '@type': 'Brand', name: SITE_NAME },
+    offers: {
+      '@type': 'Offer',
+      price: p.price,
+      priceCurrency: 'TWD',
+      availability: p.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+      url,
+      seller: { '@id': ORG_ID },
+    },
+  };
+}
+
 /** 常見問題 */
 export function faqLd(faqs: readonly { q: string; a: string }[]): Json {
   return {

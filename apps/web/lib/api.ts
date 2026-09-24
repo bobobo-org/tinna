@@ -16,6 +16,7 @@ import type {
   PublicBooking,
 } from './booking/types';
 import type { ReferralPreview } from './referral';
+import type { ShopOrderBody } from './shop';
 import type { PublicOrder, VipLookupResponse, VipOrderBody } from './vip';
 
 export class ApiError extends Error {
@@ -150,6 +151,8 @@ export function createApiClient(baseUrl: string | undefined, fetchImpl: typeof f
       request<VipLookupResponse>('/vip/lookup', { method: 'POST', body: { card_no: cardNo, email } }),
     getOrder: (orderNo: string, signal?: AbortSignal) =>
       request<PublicOrder>(`/orders/${encodeURIComponent(orderNo)}`, { signal }),
+    createShopOrder: (body: ShopOrderBody) =>
+      request<{ orderNo: string; amount: number }>('/shop/orders', { method: 'POST', body, timeoutMs: 25_000 }),
     orderCheckout: (orderNo: string) =>
       request<EcpayCheckoutResponse>('/payments/ecpay/order-checkout', { method: 'POST', body: { orderNo }, timeoutMs: 25_000 }),
   };
